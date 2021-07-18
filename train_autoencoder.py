@@ -52,9 +52,9 @@ def train():
         training_logger.log_batch_loss("albedo_para_reg", reg_albedo_param.item(), partition_, batch_size)
 
         total_loss_weighted = \
-            loss_pixel + loss_landmark * 0.01 + loss_eye + \
-            loss_gaze_target + loss_gaze_div + loss_gaze_pose + \
-            reg_shape_param * 0.01 + reg_albedo_param * 0.01
+            loss_pixel + loss_landmark * 0.1 + loss_eye * 100. + \
+            loss_gaze_target * 50. + loss_gaze_div * 10. + loss_gaze_pose * 10. + \
+            reg_shape_param * 0.005 + reg_albedo_param * 0.005
 
         training_logger.log_batch_loss("loss", loss_eye.item() + loss_gaze_target.item() + loss_gaze_div.item(),
                                        partition_, batch_size)
