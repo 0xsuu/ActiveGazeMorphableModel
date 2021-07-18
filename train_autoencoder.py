@@ -21,8 +21,8 @@ from constants import *
 
 def train():
     model = Autoencoder()
-    train_data = EYEDIAP(partition="train")
-    test_data = EYEDIAP(partition="test")
+    train_data = EYEDIAP(partition="train", head_movement="M")
+    test_data = EYEDIAP(partition="test", head_movement="M")
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v1"
+    args.name = "v1_m"
     args.epochs = 100
     args.seed = 1
     args.lr = 1e-4

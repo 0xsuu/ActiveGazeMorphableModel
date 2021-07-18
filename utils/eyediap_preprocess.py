@@ -319,7 +319,7 @@ if __name__ == '__main__':
                    "left_eyeball_rotation_crop": [], "right_eyeball_rotation_crop": [],
                    "cam_R": [], "cam_T": [], "cam_K": []}
         subject_id, experiment_id, experiment_type, head_movement = d.split("_")
-        if experiment_id == "A" and experiment_type == "FT" and head_movement == "S":
+        if experiment_id == "A" and experiment_type == "FT" and head_movement == "M":
             process_single_subject(results, subject_id, experiment_id, experiment_type, head_movement,
                                    feed="vga", preview=False)
             lengths = []

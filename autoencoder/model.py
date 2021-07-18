@@ -111,6 +111,8 @@ class Autoencoder(nn.Module):
                     "r_eyeball_centre": r_eyeball_centre,  # Right eyeball centre in world coordinate.
                     "left_eye_rotation": left_eye_rotation,  # Left and Right gaze rotation.
                     "right_eye_rotation": right_eye_rotation,  #
+                    "left_gaze": left_gaze,  # Left and Right gazes.
+                    "right_gaze": right_gaze,
                     "gaze_point_mid": gaze_point_mid,  # Predicted gaze point in world coordinate.
                     "gaze_point_dist": gaze_point_dist,  # Sum of the distances between the gaze points to gaze vector.
                     "shape_parameters": shape_parameters,  # FLAME shape parameters.
