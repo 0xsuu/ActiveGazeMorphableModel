@@ -21,9 +21,10 @@ from constants import *
 
 def train():
     model = Autoencoder()
-    # train_data = EYEDIAP()
+    train_data = EYEDIAP(partition="train")
     test_data = EYEDIAP(partition="test")
-    dl = DataLoader(test_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    test_loader = DataLoader(test_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
     optimiser = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
     scheduler = StepLR(optimiser, 100, 0.9)
@@ -55,7 +56,8 @@ def train():
             loss_gaze_target + loss_gaze_div + loss_gaze_pose + \
             reg_shape_param * 0.01 + reg_albedo_param * 0.01
 
-        training_logger.log_batch_loss("loss", total_loss_weighted.item(), partition_, batch_size)
+        training_logger.log_batch_loss("loss", loss_eye.item() + loss_gaze_target.item() + loss_gaze_div.item(),
+                                       partition_, batch_size)
 
         return total_loss_weighted
 
@@ -67,7 +69,7 @@ def train():
 
         """ Train.
         """
-        for data in tqdm(dl):
+        for data in tqdm(train_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
             camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
@@ -92,7 +94,7 @@ def train():
         """ Evaluate.
         """
         model.eval()
-        for data in tqdm(dl):
+        for data in tqdm(test_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
             camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
@@ -106,7 +108,7 @@ def train():
                 results = model(gt_img_input, camera_parameters, data["face_box_tl"], data["left_eyeball_3d"])
 
                 # Calculate losses.
-                loss = calculate_losses(data, results, "eval")
+                calculate_losses(data, results, "eval")
 
         j = 0
         gt_img_np = gt_img[j].detach().cpu().numpy()
@@ -162,7 +164,7 @@ if __name__ == '__main__':
                         help="Number of episode to train.")
     parser.add_argument("-b", "--batch_size", type=int, default=32, metavar="N",
                         help="Batch size for training.")
-    parser.add_argument("--test_batch_size", type=int, default=128, metavar="N",
+    parser.add_argument("--test_batch_size", type=int, default=32, metavar="N",
                         help="Batch size for evaluating.")
 
     # Loss function hyper-parameters.
@@ -194,8 +196,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "test2"
-    args.epochs = 40
+    args.name = "test3"
+    args.epochs = 100
     args.seed = 1
     args.lr = 1e-4
 

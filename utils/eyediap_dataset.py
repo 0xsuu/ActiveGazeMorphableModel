@@ -8,7 +8,9 @@ from constants import *
 
 
 class EYEDIAP(Dataset):
-    def __init__(self, partition="train", eval_subject=16, exp_id="A", exp_type="FT", head_movement="S"):
+    def __init__(self, partition="train", eval_subject=16, exp_id="A", exp_type="FT", head_movement="S",
+                 load_device="cuda"):
+        self.load_device = load_device
         self.dataset = None
 
         for i in range(1, 17):
@@ -36,12 +38,18 @@ class EYEDIAP(Dataset):
                 d_type = torch.long
             else:
                 d_type = torch.float32
-            self.dataset[key] = torch.from_numpy(value).to(device, d_type)
+            if load_device == "cpu":
+                self.dataset[key] = torch.from_numpy(value).to(d_type)
+            else:
+                self.dataset[key] = torch.from_numpy(value).to(device, d_type)
 
     def __getitem__(self, index):
         ret_dict = {}
         for key, value in self.dataset.items():
-            ret_dict[key] = value[index]
+            if self.load_device == "cpu":
+                ret_dict[key] = value[index].to(device)
+            else:
+                ret_dict[key] = value[index]
 
         return ret_dict
 
