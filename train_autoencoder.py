@@ -30,7 +30,7 @@ def train():
     scheduler = StepLR(optimiser, 100, 0.9)
 
     def calculate_losses(data_, results_, partition_):
-        loss_pixel = pixel_loss(results_["img"], data_["frames"].to(torch.float32) / 255.)
+        loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
         loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
         loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
                             data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
@@ -54,7 +54,7 @@ def train():
         total_loss_weighted = \
             loss_pixel + loss_landmark * 0.1 + loss_eye * 100. + \
             loss_gaze_target * 50. + loss_gaze_div * 10. + loss_gaze_pose * 10. + \
-            reg_shape_param * 0.005 + reg_albedo_param * 0.005
+            reg_shape_param * 0.05 + reg_albedo_param * 0.01
 
         training_logger.log_batch_loss("loss", loss_eye.item() + loss_gaze_target.item() + loss_gaze_div.item(),
                                        partition_, batch_size)
@@ -111,7 +111,7 @@ def train():
                 calculate_losses(data, results, "eval")
 
         j = 0
-        gt_img_np = gt_img[j].detach().cpu().numpy()
+        gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
         result_img_np = results["img"][j].detach().cpu().numpy()
 
         result_img_np_none = np.all(result_img_np == [0., 1., 0.], axis=2)

@@ -66,7 +66,7 @@ class NoLightShader(nn.Module):
 
 
 class PTRenderer(nn.Module):
-    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(FACE_CROP_SIZE, FACE_CROP_SIZE)):
+    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(224, 224)):
         super().__init__()
 
         self.image_size = image_size
