@@ -24,7 +24,7 @@ class FlameModel(nn.Module):
         faces = model_file["f"]
 
         # template_v shape: (1, 5023, 3).
-        template_v = template_v - template_v.mean(0) + np.array([0.0377, 0.0166, -0.0266])
+        template_v = template_v - template_v.mean(0) + np.array([-0.4753, 0.3760, 0.0805])
         self.register_buffer("template_v", torch.from_numpy(template_v)
                              .to(device=device, dtype=torch.float32).unsqueeze(0))
         # shape_dirs shape: (5023, 3, 400).

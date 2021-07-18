@@ -66,7 +66,7 @@ class NoLightShader(nn.Module):
 
 
 class PTRenderer(nn.Module):
-    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(480, 480)):
+    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(FACE_CROP_SIZE, FACE_CROP_SIZE)):
         super().__init__()
 
         self.image_size = image_size
@@ -129,8 +129,8 @@ class PTRenderer(nn.Module):
             # # Inplace version ends.
 
             # Non-inplace version.
-            vertices_01 = torch.stack([vertices[:, :, 0] - 80, vertices[:, :, 1]], dim=2)
-            vertices_01 = (vertices_01 / 240 - 1) * -1
+            # vertices_01 = torch.stack([vertices[:, :, 0] - 80, vertices[:, :, 1]], dim=2)
+            vertices_01 = (vertices[:, :, :2] / FACE_CROP_SIZE * 2 - 1) * -1
 
             vertices_2 = vertices[:, :, 2] * -1
             vertices_2 = vertices_2 - (vertices_2.min() - 0.01)
@@ -164,5 +164,4 @@ class PTRenderer(nn.Module):
                                           verts_uvs=self.verts_uvs.repeat(vertices.shape[0], 1, 1)))
 
         rendered_image = self.renderer(meshes_world=mesh, cameras=cameras)
-        # rendered_image = rendered_image.transpose(1, 2)
         return rendered_image[:, :, :, :3], projected_vertices

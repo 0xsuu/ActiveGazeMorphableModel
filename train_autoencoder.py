@@ -31,13 +31,13 @@ def train():
 
     def calculate_losses(data_, results_, partition_):
         loss_pixel = pixel_loss(results_["img"], data_["frames"].to(torch.float32) / 255.)
-        loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks"])
+        loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
         loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
-                            data_["left_eyeball_3d"], data_["right_eyeball_3d"])
-        loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d"])
+                            data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
+        loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
         loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
-        loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation"],
-                                        results_["right_eye_rotation"], data_["right_eyeball_rotation"])
+        loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
+                                        results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
         reg_shape_param = parameters_regulariser(results_["shape_parameters"])
         reg_albedo_param = parameters_regulariser(results_["albedo_parameters"])
 
@@ -80,7 +80,7 @@ def train():
 
             # Forward.
             optimiser.zero_grad()
-            results = model(gt_img_input, camera_parameters, data["face_box_tl"], data["left_eyeball_3d"])
+            results = model(gt_img_input, camera_parameters)
 
             # Calculate losses.
             loss = calculate_losses(data, results, "train")
@@ -89,7 +89,7 @@ def train():
             loss.backward()
             optimiser.step()
 
-            # scheduler.step()
+        # scheduler.step()
 
         """ Evaluate.
         """
@@ -105,7 +105,7 @@ def train():
 
             # Forward.
             with torch.no_grad():
-                results = model(gt_img_input, camera_parameters, data["face_box_tl"], data["left_eyeball_3d"])
+                results = model(gt_img_input, camera_parameters)
 
                 # Calculate losses.
                 calculate_losses(data, results, "eval")
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "test3"
+    args.name = "v1"
     args.epochs = 100
     args.seed = 1
     args.lr = 1e-4

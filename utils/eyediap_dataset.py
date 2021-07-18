@@ -32,7 +32,7 @@ class EYEDIAP(Dataset):
                     self.dataset[key] = np.concatenate([self.dataset[key], value])
 
         for key, value in self.dataset.items():
-            if key in ["subject_id", "frames"]:
+            if key in ["subject_id", "frames", "frame_id"]:
                 d_type = torch.uint8
             elif key == "face_box_tl":
                 d_type = torch.long

@@ -31,7 +31,7 @@ class Autoencoder(nn.Module):
                                    self.face_model.albedo_ft.unsqueeze(0),
                                    self.face_model.albedo_vt.unsqueeze(0)).to(device)
 
-    def forward(self, x, camera_parameters, face_box_tl, dbg):
+    def forward(self, x, camera_parameters):
         # Encoder.
         hidden_vector = self.encoder(x)
         shape_parameters = hidden_vector[:, :400]
@@ -52,9 +52,11 @@ class Autoencoder(nn.Module):
         vert = torch.bmm(vert - vert.mean(1, keepdims=True), rotation_matrix_from_axis_combined(face_rotation)) \
             * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)
 
-        # TODO: Debug
-        # vert = vert - torch.mean(vert[:, self.face_model.left_eyeball_mask], dim=1).unsqueeze(1) + dbg.unsqueeze(1)
-        # print(vert.mean([0, 1]))
+        # # TODO: Debug
+        # vert = vert - torch.mean(vert[:, self.face_model.left_eyeball_mask], dim=1).unsqueeze(1) + dbg1.unsqueeze(1)
+        # # print(vert.mean([0, 1]))
+        # left_eye_rotation = dbg2
+        # right_eye_rotation = dbg3
 
         # Extracting key points in world coordinate.
         l_eyeball = vert[:, self.face_model.left_eyeball_mask]
@@ -63,10 +65,12 @@ class Autoencoder(nn.Module):
         r_eyeball_centre = torch.mean(r_eyeball, dim=1, keepdim=True)
 
         # Apply rotations to eyeballs.
+        # Inplace version.
         # vert[:, self.face_model.left_eyeball_mask] = \
         #     self.apply_eyeball_rotation(l_eyeball, l_eyeball_centre, left_eye_rotation)
         # vert[:, self.face_model.right_eyeball_mask] = \
         #     self.apply_eyeball_rotation(r_eyeball, r_eyeball_centre, right_eye_rotation)
+        # Non-inplace version.
         vert_eyes = torch.zeros_like(vert)
         vert_eyes[:, self.face_model.left_eyeball_mask] = vert[:, self.face_model.left_eyeball_mask]
         vert_eyes[:, self.face_model.right_eyeball_mask] = vert[:, self.face_model.right_eyeball_mask]
@@ -96,8 +100,8 @@ class Autoencoder(nn.Module):
 
         # Differentiable render.
         img, vert_img = self.renderer(vert, tex, camera_parameters)
-        img = torch.stack([im[fc[1]:fc[1] + FACE_CROP_SIZE, fc[0] - 80:fc[0] + FACE_CROP_SIZE - 80, :]
-                           for im, fc in zip(img, face_box_tl)])
+        # img = torch.stack([im[fc[1]:fc[1] + FACE_CROP_SIZE, fc[0] - 80:fc[0] + FACE_CROP_SIZE - 80, :]
+        #                    for im, fc in zip(img, face_box_tl)])
         
         face_landmarks = vert_img[:, self.face_model.masked_landmarks, :2]
 

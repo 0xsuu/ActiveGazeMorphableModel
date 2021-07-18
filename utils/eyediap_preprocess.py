@@ -80,6 +80,13 @@ def crop_after_3d_point(point, crop_tl, camera_parameters):
     return img_to_world(point_2dz, intrinsics, R, T)[0]
 
 
+def find_gaze_axis_rotation(target, eyeball_centre):
+    gaze = target - eyeball_centre
+    rotation = np.array([np.arctan2(gaze[1], gaze[2]),
+                         np.arctan2(gaze[2], gaze[0]) - np.arctan2(1, 0)])
+    return rotation
+
+
 def process_single_subject(result_dict, subject_id, experiment_id, experiment_type, head_movement,
                            feed="vga", preview=True):
     """
@@ -215,6 +222,7 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
             cropped_face = img[face_top_left_coord[1]:face_top_left_coord[1] + FACE_CROP_SIZE,
                                face_top_left_coord[0]:face_top_left_coord[0] + FACE_CROP_SIZE]
             cropped_face_copy = cropped_face.copy()
+            result_dict["frame_id"].append(frame_idx)
             result_dict["subject_id"].append(subject_id)
             result_dict["cam_R"].append(cam_R)
             result_dict["cam_T"].append(cam_T.T[0])
@@ -222,6 +230,7 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
             result_dict["frames"].append(cropped_face.copy())
             result_dict["face_box_tl"].append(face_top_left_coord)
             result_dict["face_landmarks"].append(np.concatenate(face_lms))
+            result_dict["face_landmarks_crop"].append(np.concatenate(face_lms) - face_top_left_coord)
             draw_face_result(img, face_bbox, face_lms)
             draw_face_landmarks(cropped_face_copy, np.concatenate(face_lms) - face_top_left_coord)
 
@@ -239,6 +248,10 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
             result_dict["right_eyeball_3d"].append(eye_l_3d_coord[frame_idx])
             result_dict["left_eyeball_2d"].append(eye_l_2d_coord[frame_idx])
             result_dict["right_eyeball_2d"].append(eye_l_2d_coord[frame_idx])
+            result_dict["left_eyeball_3d_crop"].append(crop_eye_r_3d)
+            result_dict["right_eyeball_3d_crop"].append(crop_eye_l_3d)
+            result_dict["left_eyeball_2d_crop"].append(crop_eye_r_2d)
+            result_dict["right_eyeball_2d_crop"].append(crop_eye_l_2d)
             if experiment_type in ["CS", "DS"]:
                 draw_line(img, eye_l_2d_coord[frame_idx], scr_2d_coord[frame_idx])
                 draw_line(img, eye_r_2d_coord[frame_idx], scr_2d_coord[frame_idx])
@@ -246,6 +259,8 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
                 draw_line(img, eye_r_proj[frame_idx], scr_2d_coord[frame_idx], thickness=1)
 
                 result_dict["target_screen"].append(scr_2d_coord[frame_idx])
+
+                raise NotImplemented
             elif experiment_type == "FT":
                 draw_line(img, eye_l_2d_coord[frame_idx], ball_2d_coord[frame_idx], colour=(0, 0, 255))
                 draw_line(img, eye_r_2d_coord[frame_idx], ball_2d_coord[frame_idx], colour=(0, 0, 255))
@@ -259,19 +274,23 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
 
                 result_dict["target_3d"].append(ball_3d_coord[frame_idx])
                 result_dict["target_2d"].append(ball_2d_coord[frame_idx])
+                result_dict["target_3d_crop"].append(crop_target_3d)
+                result_dict["target_2d_crop"].append(crop_target_2d)
                 draw_line(cropped_face_copy, crop_eye_l_2d, crop_target_2d, colour=(0, 0, 255))
                 draw_line(cropped_face_copy, crop_eye_r_2d, crop_target_2d, colour=(0, 0, 255))
                 draw_line(cropped_face_copy, crop_eye_l_2d_proj, crop_target_2d_proj, thickness=1)
                 draw_line(cropped_face_copy, crop_eye_r_2d_proj, crop_target_2d_proj, thickness=1)
+            else:
+                raise NotImplemented
 
-            gaze_l = ball_3d_coord[frame_idx] - eye_l_3d_coord[frame_idx]
-            rotation_l = np.array([np.arctan2(gaze_l[1], gaze_l[2]),
-                                   np.arctan2(gaze_l[2], gaze_l[0]) - np.arctan2(1, 0)])
-            gaze_r = ball_3d_coord[frame_idx] - eye_r_3d_coord[frame_idx]
-            rotation_r = np.array([np.arctan2(gaze_r[1], gaze_r[2]),
-                                   np.arctan2(gaze_r[2], gaze_r[0]) - np.arctan2(1, 0)])
+            rotation_l = find_gaze_axis_rotation(ball_3d_coord[frame_idx], eye_l_3d_coord[frame_idx])
+            rotation_r = find_gaze_axis_rotation(ball_3d_coord[frame_idx], eye_r_3d_coord[frame_idx])
             result_dict["left_eyeball_rotation"].append(rotation_r)
             result_dict["right_eyeball_rotation"].append(rotation_l)
+            rotation_l_crop = find_gaze_axis_rotation(crop_target_3d, crop_eye_l_3d)
+            rotation_r_crop = find_gaze_axis_rotation(crop_target_3d, crop_eye_r_3d)
+            result_dict["left_eyeball_rotation_crop"].append(rotation_r_crop)
+            result_dict["right_eyeball_rotation_crop"].append(rotation_l_crop)
 
             marked_video_writer.write(img)
 
@@ -290,10 +309,15 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
 if __name__ == '__main__':
     for d in os.listdir(EYEDIAP_PATH + "Data/"):
         print("Processing", d, "...")
-        results = {"subject_id": [], "frames": [], "face_box_tl": [], "face_landmarks": [],
+        results = {"frame_id": [], "subject_id": [], "frames": [], "face_box_tl": [],
+                   "face_landmarks": [], "face_landmarks_crop": [],
                    "target_3d": [], "left_eyeball_3d": [], "right_eyeball_3d": [],
                    "target_2d": [], "left_eyeball_2d": [], "right_eyeball_2d": [],
-                   "left_eyeball_rotation": [], "right_eyeball_rotation": [], "cam_R": [], "cam_T": [], "cam_K": []}
+                   "target_3d_crop": [], "left_eyeball_3d_crop": [], "right_eyeball_3d_crop": [],
+                   "target_2d_crop": [], "left_eyeball_2d_crop": [], "right_eyeball_2d_crop": [],
+                   "left_eyeball_rotation": [], "right_eyeball_rotation": [],
+                   "left_eyeball_rotation_crop": [], "right_eyeball_rotation_crop": [],
+                   "cam_R": [], "cam_T": [], "cam_K": []}
         subject_id, experiment_id, experiment_type, head_movement = d.split("_")
         if experiment_id == "A" and experiment_type == "FT" and head_movement == "S":
             process_single_subject(results, subject_id, experiment_id, experiment_type, head_movement,
