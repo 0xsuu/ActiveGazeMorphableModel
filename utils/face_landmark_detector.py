@@ -38,14 +38,15 @@ class FaceLandmarkDetector(object):
     def process_face(self, image):
         faces = self.retina_face(image)
         if len(faces) == 0:
-            raise ValueError("No face detected.")
+            return None, None
         
         if len(faces) == 1:
             face = faces[0]
         else:
             face = max(faces, key=lambda x: x[4])
 
-        assert face[4] >= 0.9
+        if face[4] < 0.9:
+            return None, None
         x1, y1, x2, y2 = face[0], face[1], face[2], face[3]
         w = x2 - x1 + 1
         h = y2 - y1 + 1

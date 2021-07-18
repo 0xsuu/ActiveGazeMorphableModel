@@ -16,3 +16,8 @@ DATASETS_PATH = PROJECT_PATH + "datasets/"
 
 EYEDIAP_PATH = "Z:/research/datasets/EYEDIAP/"
 FLAME_PATH = "Z:/research/datasets/FLAME/"
+
+LOGS_PATH = PROJECT_PATH + "logs/"
+
+""" Parameters configuration """
+FACE_CROP_SIZE = 96

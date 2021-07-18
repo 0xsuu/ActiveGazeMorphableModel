@@ -24,6 +24,7 @@ class FlameModel(nn.Module):
         faces = model_file["f"]
 
         # template_v shape: (1, 5023, 3).
+        template_v = template_v - template_v.mean(0) + np.array([0.0377, 0.0166, -0.0266])
         self.register_buffer("template_v", torch.from_numpy(template_v)
                              .to(device=device, dtype=torch.float32).unsqueeze(0))
         # shape_dirs shape: (5023, 3, 400).
@@ -43,10 +44,18 @@ class FlameModel(nn.Module):
         self.register_buffer("albedo_vt", torch.from_numpy(albedo_vt).to(device, torch.float32))
 
         # Load landmarks.
-        with open(landmark_path, "rb") as f:
-            landmark_file = pickle.load(f, encoding="latin1")
-        f_landmarks = torch.from_numpy(landmark_file["lmk_face_idx"].astype(np.long)).to(device, torch.long)
-        landmarks = self.faces[f_landmarks, 2]
+        # with open(landmark_path, "rb") as f:
+        #     landmark_file = pickle.load(f, encoding="latin1")
+        # f_landmarks = torch.from_numpy(landmark_file["lmk_face_idx"].astype(np.long)).to(device, torch.long)
+        # self.landmarks0 = self.faces[f_landmarks[14:19], 0]
+        # self.landmarks1 = self.faces[f_landmarks[14:19], 1]
+        # self.landmarks2 = self.faces[f_landmarks[14:19], 2]
+        landmarks = torch.tensor([3764, 2566, 335, 3153, 3712, 673, 3863, 16, 2138, 3892,  # Eyebrows.
+                                  3553, 3561, 3501, 3563,  # Nose ridge.
+                                  2746, 2795, 3552, 1678, 1618,  # Nose bottom.
+                                  2437, 2453, 2494, 3632, 2293, 2333,  # Left eye.
+                                  3833, 1343, 1218, 1175, 955, 881],  # Right eye.
+                                 dtype=torch.long, device=device)
         self.register_buffer("landmarks", landmarks)
 
         # Load masks.
@@ -60,6 +69,11 @@ class FlameModel(nn.Module):
             total_mask = np.sort(np.unique(np.concatenate(total_mask)))
             self.register_buffer("mask", torch.from_numpy(total_mask).to(device, torch.long))
             self.mask_faces(self.mask)
+
+            masked_landmarks = []
+            for lm in landmarks:
+                masked_landmarks.append(torch.nonzero(self.mask == lm.item()).flatten())
+            self.register_buffer("masked_landmarks", torch.cat(masked_landmarks))
         else:
             for mk in masks_file:
                 self.register_buffer(mk + "_mask", torch.from_numpy(masks_file[mk]).to(device, torch.long))
@@ -117,8 +131,16 @@ def visualise_model():
         # torch.tensor([[-0.1205, -0.0031,  0.4866]], device=device)  # Ball.
 
         lms = []
+        # Visualise triangle landmarks for selection.
+        # for i in range(fm.landmarks0.shape[0]):
+        #     lms.append(Sphere(vert[0, fm.landmarks0[i]].cpu().numpy().flatten(), 0.001).to_mesh((255, 0, 0)))
+        #     lms.append(Sphere(vert[0, fm.landmarks1[i]].cpu().numpy().flatten(), 0.001).to_mesh((0, 255, 0)))
+        #     lms.append(Sphere(vert[0, fm.landmarks2[i]].cpu().numpy().flatten(), 0.001).to_mesh((0, 0, 255)))
+        #     print(fm.landmarks0[i].item(), fm.landmarks1[i].item(), fm.landmarks2[i].item())
+        # Visualise selected landmarks.
         for i in range(fm.landmarks.shape[0]):
             lms.append(Sphere(vert[0, fm.landmarks[i]].cpu().numpy().flatten(), 0.001).to_mesh())
+
         vert = vert[:, fm.mask]
 
         # Visualise using MeshViewer.
@@ -147,7 +169,6 @@ def visualise_model():
         bg[img_coords_shifted] = img[img_coords] * 255.
         cv2.imshow("", bg)
         cv2.waitKey(1)
-
         time.sleep(0.25)
 
 

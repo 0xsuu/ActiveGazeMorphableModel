@@ -71,7 +71,7 @@ class PTRenderer(nn.Module):
 
         self.image_size = image_size
 
-        blend_params = BlendParams(background_color=(0., 0., 0.))
+        blend_params = BlendParams(background_color=(0., 1., 0.))
         raster_settings = RasterizationSettings(image_size=image_size, blur_radius=0.0, faces_per_pixel=1,
                                                 perspective_correct=True)
 
@@ -89,20 +89,23 @@ class PTRenderer(nn.Module):
         self.register_buffer("faces_uvs", faces_uvs)
         self.register_buffer("verts_uvs", verts_uvs)
 
+    @staticmethod
+    def project_world_to_img(vertices, camera_parameters):
+        cam_R, cam_T, cam_K = camera_parameters
+
+        cameras = PerspectiveCameras(R=cam_R, T=cam_T, K=cam_K, device=device)
+
+        vertices_img = cameras.transform_points(vertices)
+
+        return vertices_img, cameras
+
     def forward(self, vertices, textures, camera_parameters=None):
         if camera_parameters is not None:
-            cam_R, cam_T, cam_K = camera_parameters
-
-            cameras = PerspectiveCameras(R=cam_R, T=cam_T, K=cam_K, device=device)
-
             # # Camera configured as recommended. Not projecting to the right position though.
             # cameras2 = PerspectiveCameras(R=cam_R, T=cam_T,
             #                               principal_point=cam_K[:, :2, 2],
             #                               focal_length=torch.diagonal(cam_K, dim1=1, dim2=2)[:, :2],
             #                               device=device, image_size=(self.image_size,))
-
-            vertices_ndc = cameras.transform_points(vertices.clone())
-            vertices_ndc[:, :, 0] -= 80
 
             # # Screen to NDC and NDC to screen. Not working, don't know why.
             # vertices_ndc[:, :, 0] = 1 - (vertices_ndc[:, :, 0] * 2) / (image_width - 1.0)
@@ -112,13 +115,28 @@ class PTRenderer(nn.Module):
             # screen_y = (image_height - 1.0) / 2.0 * (1.0 - vertices_ndc[..., 1])
             # vertices = torch.stack((screen_x, screen_y, ndc_z), dim=2)
 
-            vertices = vertices_ndc
-            vertices[:, :, :2] = vertices[:, :, :2] / 480 * 2 - 1
-            vertices[:, :, :2] *= -1
+            vertices, cameras = self.project_world_to_img(vertices, camera_parameters)
+            projected_vertices = vertices[:, :, :2].clone()
 
-            vertices[:, :, 2] *= -1
-            vertices[:, :, 2] -= vertices[:, :, 2].min() - 0.01
-            vertices[:, :, 2] /= vertices[:, :, 2].max() + 0.01
+            # # Inplace version starts.
+            # vertices[:, :, 0] -= 80
+            # vertices[:, :, :2] = vertices[:, :, :2] / 480 * 2 - 1
+            # vertices[:, :, :2] *= -1
+            #
+            # vertices[:, :, 2] *= -1
+            # vertices[:, :, 2] -= vertices[:, :, 2].min() - 0.01
+            # vertices[:, :, 2] /= vertices[:, :, 2].max() + 0.01
+            # # Inplace version ends.
+
+            # Non-inplace version.
+            vertices_01 = torch.stack([vertices[:, :, 0] - 80, vertices[:, :, 1]], dim=2)
+            vertices_01 = (vertices_01 / 240 - 1) * -1
+
+            vertices_2 = vertices[:, :, 2] * -1
+            vertices_2 = vertices_2 - (vertices_2.min() - 0.01)
+            vertices_2 = vertices_2 / (vertices_2.max() + 0.01)
+
+            vertices = torch.cat([vertices_01, vertices_2.unsqueeze(-1)], dim=2)
 
             # img = torch.zeros((1, 480, 480, 3), dtype=torch.uint8, device=device)
             # img[:, vertices[:, :, 0].to(torch.long), vertices[:, :, 1].to(torch.long), :] = torch.tensor([1., 1., 0.], dtype=torch.uint8, device=device)
@@ -137,9 +155,14 @@ class PTRenderer(nn.Module):
             vertices[:, :, 2] -= vertices[:, :, 2].min() - 0.01
             vertices[:, :, 2] /= vertices[:, :, 2].max() + 0.01
 
-        mesh = Meshes(verts=vertices, faces=self.faces.repeat(vertices.size(0), 1, 1),
-                      textures=TexturesUV(maps=textures, faces_uvs=self.faces_uvs, verts_uvs=self.verts_uvs))
+            cameras = None
+            projected_vertices = None
+
+        mesh = Meshes(verts=vertices, faces=self.faces.repeat(vertices.shape[0], 1, 1),
+                      textures=TexturesUV(maps=textures,
+                                          faces_uvs=self.faces_uvs.repeat(vertices.shape[0], 1, 1),
+                                          verts_uvs=self.verts_uvs.repeat(vertices.shape[0], 1, 1)))
 
         rendered_image = self.renderer(meshes_world=mesh, cameras=cameras)
         # rendered_image = rendered_image.transpose(1, 2)
-        return rendered_image[:, :, :, :3]
+        return rendered_image[:, :, :, :3], projected_vertices
