@@ -14,7 +14,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v1_server"
+NAME = "v1_m_server"
 
 
 def evaluate(qualitative=False):
@@ -24,7 +24,7 @@ def evaluate(qualitative=False):
     model.load_state_dict(torch.load(LOGS_PATH + NAME + "/model_best.pt"))
     model.eval()
 
-    test_data = EYEDIAP(partition="test")
+    test_data = EYEDIAP(partition="test", head_movement=["M"])
     test_loader = DataLoader(test_data, batch_size=1, shuffle=True, num_workers=0)
 
     l_gaze_angle_errors_rot = []
@@ -54,6 +54,18 @@ def evaluate(qualitative=False):
         r_eyeball_centre = results["r_eyeball_centre"][0].cpu().numpy()
         l_gaze_rot = results["left_gaze"][0].cpu().numpy() + l_eyeball_centre
         r_gaze_rot = results["right_gaze"][0].cpu().numpy() + r_eyeball_centre
+        # l_gaze_rot = Autoencoder.apply_eyeball_rotation(
+        #     torch.tensor([[[0., 0., 1.]]], device=device),
+        #     torch.tensor([[[0., 0., 0.]]], device=device),
+        #     results["left_eye_rotation"] + torch.tensor([[-0.00849474, -0.02305407]],
+        #                                                 device=device))[0].cpu().numpy() \
+        #     + l_eyeball_centre
+        # r_gaze_rot = Autoencoder.apply_eyeball_rotation(
+        #     torch.tensor([[[0., 0., 1.]]], device=device),
+        #     torch.tensor([[[0., 0., 0.]]], device=device),
+        #     results["right_eye_rotation"] + torch.tensor([[-0.01840461, -0.03251669]],
+        #                                                  device=device))[0].cpu().numpy() \
+        #     + r_eyeball_centre
         target = results["gaze_point_mid"][0].cpu().numpy()
         cam_R, cam_T, cam_K = camera_parameters
         cam_intrinsics = cam_K[0, :3, :3]
@@ -119,6 +131,7 @@ def evaluate(qualitative=False):
     l_gaze_rot_axis_gt = np.stack(l_gaze_rot_axis_gt)
     r_gaze_rot_axis_gt = np.stack(r_gaze_rot_axis_gt)
     draw_distribution_scatter(l_gaze_rot_axis_pred, l_gaze_rot_axis_gt)
+    draw_distribution_scatter(r_gaze_rot_axis_pred, r_gaze_rot_axis_gt)
 
 
 def revert_to_original_position(point_3d, face_box_tl, cam_intrinsics, cam_R, cam_T):
@@ -133,8 +146,14 @@ def get_angle(vec_a, vec_b):
 
 
 def draw_distribution_scatter(pred, gt):
+    plt.figure()
     plt.scatter(pred[:, 0], pred[:, 1], marker=".")
     plt.scatter(gt[:, 0], gt[:, 1], marker=".")
+    plt.show()
+    plt.figure()
+    plt.scatter((gt - pred)[:, 0], (gt - pred)[:, 1], marker=".")
+    plt.scatter(np.mean((gt - pred)[:, 0]), np.mean((gt - pred)[:, 1]), marker="x")
+    print(np.mean(gt - pred, axis=0))
     plt.show()
 
 

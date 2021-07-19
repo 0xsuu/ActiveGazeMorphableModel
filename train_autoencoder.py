@@ -21,13 +21,16 @@ from constants import *
 
 def train():
     model = Autoencoder()
-    train_data = EYEDIAP(partition="train", head_movement="M")
-    test_data = EYEDIAP(partition="test", head_movement="M")
+    train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
+    test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
     optimiser = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
-    scheduler = StepLR(optimiser, 100, 0.9)
+    if args.lr_scheduler == "step":
+        scheduler = StepLR(optimiser, 25, 0.9)
+    else:
+        scheduler = None
 
     def calculate_losses(data_, results_, partition_):
         loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
@@ -52,9 +55,9 @@ def train():
         training_logger.log_batch_loss("albedo_para_reg", reg_albedo_param.item(), partition_, batch_size)
 
         total_loss_weighted = \
-            loss_pixel + loss_landmark * 0.1 + loss_eye * 100. + \
-            loss_gaze_target * 50. + loss_gaze_div * 10. + loss_gaze_pose * 10. + \
-            reg_shape_param * 0.05 + reg_albedo_param * 0.01
+            loss_pixel * args.lambda1 + loss_landmark * args.lambda2 + loss_eye * args.lambda3 + \
+            loss_gaze_target * args.lambda4 + loss_gaze_div * args.lambda5 + loss_gaze_pose * args.lambda6 + \
+            reg_shape_param * args.lambda7 + reg_albedo_param * args.lambda8
 
         training_logger.log_batch_loss("loss", loss_eye.item() + loss_gaze_target.item() + loss_gaze_div.item(),
                                        partition_, batch_size)
@@ -89,7 +92,8 @@ def train():
             loss.backward()
             optimiser.step()
 
-        # scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
 
         """ Evaluate.
         """
@@ -170,17 +174,19 @@ if __name__ == '__main__':
     # Loss function hyper-parameters.
     parser.add_argument("--lambda1", type=float, nargs="*", default=1.,
                         help="Lambda to balance loss function.")
-    parser.add_argument("--lambda2", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda2", type=float, nargs="*", default=0.1,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda3", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda3", type=float, nargs="*", default=100.,
                         help="Lambda to balance loss function.")
-    parser.add_argument("--lambda4", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda4", type=float, nargs="*", default=50.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda5", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda5", type=float, nargs="*", default=10.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda6", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda6", type=float, nargs="*", default=10.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda7", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda7", type=float, nargs="*", default=0.05,
+                        help="Lambda to balance loss functions.")
+    parser.add_argument("--lambda8", type=float, nargs="*", default=0.01,
                         help="Lambda to balance loss functions.")
     parser.add_argument("--lr", type=float, default=5e-4,
                         help="Learning rate.")
@@ -196,16 +202,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v1_m"
-    args.epochs = 100
+    # args.name = "v1_m"
+    args.epochs = 150
     args.seed = 1
     args.lr = 1e-4
+    args.lr_scheduler = "step"
 
-    # args.lambda3 = 1e-2
-    # args.lambda4 = 1e-3
-    # args.lambda5 = 1e1
-    # args.lambda6 = 0
-    # args.lambda9 = 1.
     args.batch_size = 32
 
     args.override = True
