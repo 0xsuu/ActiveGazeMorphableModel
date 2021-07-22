@@ -1,10 +1,9 @@
 
 import torch
 import torch.nn as nn
-import torchvision.models as models
 from pytorch3d.transforms import axis_angle_to_matrix
-from torchvision.models.resnet import load_state_dict_from_url, BasicBlock, model_urls
 
+from autoencoder.encoder import Encoder
 from face_model.flame_model import FlameModel
 from constants import *
 from pt_renderer import PTRenderer
@@ -15,13 +14,7 @@ class Autoencoder(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.encoder = models.ResNet(BasicBlock, [2, 2, 2, 2], num_classes=400 + 145 + 3 + 3 + 1 + 2 + 2).to(device)
-        pretrain_state_dict = load_state_dict_from_url(model_urls["resnet18"], progress=True)
-        pretrain_state_dict.pop("fc.weight")
-        pretrain_state_dict.pop("fc.bias")
-        self.encoder.load_state_dict(pretrain_state_dict, strict=False)
-        nn.init.normal_(self.encoder.fc.weight, 0., 0.001)
-        nn.init.zeros_(self.encoder.fc.bias)
+        self.encoder = Encoder(400 + 145 + 3 + 3 + 1 + 2 + 2)
 
         self.face_model = FlameModel(FLAME_PATH + "FLAME2020/generic_model.pkl",
                                      FLAME_PATH + "albedoModel2020_FLAME_albedoPart.npz",
@@ -33,14 +26,14 @@ class Autoencoder(nn.Module):
 
     def forward(self, x, camera_parameters):
         # Encoder.
-        hidden_vector = self.encoder(x)
-        shape_parameters = hidden_vector[:, :400]
-        albedo_parameters = hidden_vector[:, 400:545]
-        face_rotation = hidden_vector[:, 545:548]
-        face_translation = hidden_vector[:, 548:551]
-        face_scale = hidden_vector[:, 551:552]
-        left_eye_rotation = hidden_vector[:, 552:554]
-        right_eye_rotation = hidden_vector[:, 554:556]
+        latent_code = self.encoder(x)
+        shape_parameters = latent_code[:, :400]
+        albedo_parameters = latent_code[:, 400:545]
+        face_rotation = latent_code[:, 545:548]
+        face_translation = latent_code[:, 548:551]
+        face_scale = latent_code[:, 551:552]
+        left_eye_rotation = latent_code[:, 552:554]
+        right_eye_rotation = latent_code[:, 554:556]
 
         face_scale = face_scale + 1.
 
@@ -64,6 +57,12 @@ class Autoencoder(nn.Module):
         l_eyeball_centre = torch.mean(l_eyeball, dim=1, keepdim=True)
         r_eyeball_centre = torch.mean(r_eyeball, dim=1, keepdim=True)
 
+        # Get initial gaze direction caused by head movement.
+        l_eyeball_gaze_init = vert[:, 4051:4052] - l_eyeball_centre
+        r_eyeball_gaze_init = vert[:, 4597:4598] - r_eyeball_centre
+        l_eyeball_gaze_init = l_eyeball_gaze_init / torch.norm(l_eyeball_gaze_init, dim=2, keepdim=True)
+        r_eyeball_gaze_init = r_eyeball_gaze_init / torch.norm(r_eyeball_gaze_init, dim=2, keepdim=True)
+
         # Apply rotations to eyeballs.
         # Inplace version.
         # vert[:, self.face_model.left_eyeball_mask] = \
@@ -75,6 +74,15 @@ class Autoencoder(nn.Module):
         vert_eyes[:, self.face_model.left_eyeball_mask] = vert[:, self.face_model.left_eyeball_mask]
         vert_eyes[:, self.face_model.right_eyeball_mask] = vert[:, self.face_model.right_eyeball_mask]
         vert_no_eyes = vert - vert_eyes
+        # Normalise eyeball vertices to make it look at [0, 0, 1].
+        vert_eyes[:, self.face_model.left_eyeball_mask] = \
+            self.apply_eyeball_rotation(l_eyeball, l_eyeball_centre,
+                                        self.find_gaze_axis_rotation(l_eyeball_gaze_init))
+        vert_eyes[:, self.face_model.right_eyeball_mask] = \
+            self.apply_eyeball_rotation(r_eyeball, r_eyeball_centre,
+                                        self.find_gaze_axis_rotation(r_eyeball_gaze_init))
+
+        # Apply predicted gaze direction.
         vert_eyes[:, self.face_model.left_eyeball_mask] = \
             self.apply_eyeball_rotation(l_eyeball, l_eyeball_centre, left_eye_rotation)
         vert_eyes[:, self.face_model.right_eyeball_mask] = \
@@ -88,10 +96,10 @@ class Autoencoder(nn.Module):
                                                  torch.tensor([[0., 0., 0.]], device=device), right_eye_rotation)
 
         lr_cross = torch.cross(left_gaze, right_gaze, dim=2)
-        results = torch.bmm(torch.inverse(torch.cat([left_gaze, -right_gaze, lr_cross], dim=1).transpose(1, 2)),
-                            (r_eyeball_centre - l_eyeball_centre).transpose(1, 2))
-        gaze_point_l = l_eyeball_centre + results[:, 0:1, :] * left_gaze
-        gaze_point_r = r_eyeball_centre + results[:, 1:2, :] * right_gaze
+        lin_solve = torch.bmm(torch.inverse(torch.cat([left_gaze, -right_gaze, lr_cross], dim=1).transpose(1, 2)),
+                              (r_eyeball_centre - l_eyeball_centre).transpose(1, 2))
+        gaze_point_l = l_eyeball_centre + lin_solve[:, 0:1, :] * left_gaze
+        gaze_point_r = r_eyeball_centre + lin_solve[:, 1:2, :] * right_gaze
         gaze_point_mid = (gaze_point_l + gaze_point_r) / 2
         gaze_point_dist = torch.linalg.norm(gaze_point_l - gaze_point_r, dim=2).squeeze(1)
 
@@ -128,3 +136,20 @@ class Autoencoder(nn.Module):
             axis_angle_to_matrix(torch.cat([eyeball_rotation_euler,
                                             torch.zeros_like(eyeball_rotation_euler[:, 0:1])], dim=1))) \
             + eyeball_centre
+
+    @staticmethod
+    def find_gaze_axis_rotation(init_gaze):
+        """
+        Find the azimuth and elevation axis angles from init_gaze to [0, 0, 1]
+
+        v1 -> v2 = [0, 0, 1]
+        azimuth = atan2(v2.z,v2.y) - atan2(v1.z,v1.y)
+        elevation = atan2(v2.z,v2.x) - atan2(v1.z,v1.x)
+
+        :param init_gaze:
+        :return:
+        """
+        azimuth = - torch.atan2(init_gaze[:, 0, 1], init_gaze[:, 0, 2])
+        elevation = 1.5707963267948966 - torch.atan2(init_gaze[:, 0, 2], init_gaze[:, 0, 0])  # atan2(1, 0) - ...
+
+        return torch.stack([azimuth, elevation], dim=1)

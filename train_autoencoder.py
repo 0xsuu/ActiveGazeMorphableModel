@@ -172,21 +172,21 @@ if __name__ == '__main__':
                         help="Batch size for evaluating.")
 
     # Loss function hyper-parameters.
-    parser.add_argument("--lambda1", type=float, nargs="*", default=1.,
+    parser.add_argument("--lambda1", type=float, default=1.,
                         help="Lambda to balance loss function.")
-    parser.add_argument("--lambda2", type=float, nargs="*", default=0.1,
+    parser.add_argument("--lambda2", type=float, default=0.1,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda3", type=float, nargs="*", default=100.,
+    parser.add_argument("--lambda3", type=float, default=100.,
                         help="Lambda to balance loss function.")
-    parser.add_argument("--lambda4", type=float, nargs="*", default=50.,
+    parser.add_argument("--lambda4", type=float, default=50.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda5", type=float, nargs="*", default=10.,
+    parser.add_argument("--lambda5", type=float, default=10.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda6", type=float, nargs="*", default=10.,
+    parser.add_argument("--lambda6", type=float, default=10.,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda7", type=float, nargs="*", default=0.05,
+    parser.add_argument("--lambda7", type=float, default=0.05,
                         help="Lambda to balance loss functions.")
-    parser.add_argument("--lambda8", type=float, nargs="*", default=0.01,
+    parser.add_argument("--lambda8", type=float, default=0.01,
                         help="Lambda to balance loss functions.")
     parser.add_argument("--lr", type=float, default=5e-4,
                         help="Learning rate.")

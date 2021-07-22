@@ -1,5 +1,5 @@
-import logging
 
+import logging
 import cv2
 import torch
 from matplotlib import pyplot as plt
@@ -14,18 +14,32 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v1_m_server"
+NAME = "v1_mix_server_steplr_lmd1x10"
 
 
 def evaluate(qualitative=False):
     logging.info(NAME)
     
     model = Autoencoder()
-    model.load_state_dict(torch.load(LOGS_PATH + NAME + "/model_best.pt"))
+    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
+
+    # Version change fixing.
+    new_saved_state_dict = {}
+    for k, v in saved_state_dict.items():
+        if "encoder" in k and "net" not in k:
+            new_saved_state_dict[".".join(["encoder", "net"] + k.split(".")[1:])] = v
+        else:
+            new_saved_state_dict[k] = v
+    saved_state_dict = new_saved_state_dict
+
+    model.load_state_dict(saved_state_dict)
     model.eval()
 
-    test_data = EYEDIAP(partition="test", head_movement=["M"])
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=True, num_workers=0)
+    test_data = EYEDIAP(partition="test", head_movement=["M", "S"])
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
+
+    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_full.mov",
+                                            cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
 
     l_gaze_angle_errors_rot = []
     r_gaze_angle_errors_rot = []
@@ -54,6 +68,8 @@ def evaluate(qualitative=False):
         r_eyeball_centre = results["r_eyeball_centre"][0].cpu().numpy()
         l_gaze_rot = results["left_gaze"][0].cpu().numpy() + l_eyeball_centre
         r_gaze_rot = results["right_gaze"][0].cpu().numpy() + r_eyeball_centre
+
+        # # Fix for Kapa angle.
         # l_gaze_rot = Autoencoder.apply_eyeball_rotation(
         #     torch.tensor([[[0., 0., 1.]]], device=device),
         #     torch.tensor([[[0., 0., 0.]]], device=device),
@@ -66,6 +82,7 @@ def evaluate(qualitative=False):
         #     results["right_eye_rotation"] + torch.tensor([[-0.01840461, -0.03251669]],
         #                                                  device=device))[0].cpu().numpy() \
         #     + r_eyeball_centre
+
         target = results["gaze_point_mid"][0].cpu().numpy()
         cam_R, cam_T, cam_K = camera_parameters
         cam_intrinsics = cam_K[0, :3, :3]
@@ -76,31 +93,64 @@ def evaluate(qualitative=False):
         r_gaze_rot_axis_pred.append(results["right_eye_rotation"][0].cpu().numpy())
         l_gaze_rot_axis_gt.append(data["left_eyeball_rotation_crop"][0].cpu().numpy())
         r_gaze_rot_axis_gt.append(data["right_eyeball_rotation_crop"][0].cpu().numpy())
-        l_eyeball_centre = revert_to_original_position(l_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
-        r_eyeball_centre = revert_to_original_position(r_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
+        l_eyeball_centre_orig = revert_to_original_position(l_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
+        r_eyeball_centre_orig = revert_to_original_position(r_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
         l_gaze_rot = revert_to_original_position(l_gaze_rot, face_box_tl, cam_intrinsics, cam_R, cam_T)
         r_gaze_rot = revert_to_original_position(r_gaze_rot, face_box_tl, cam_intrinsics, cam_R, cam_T)
-        target = revert_to_original_position(target, face_box_tl, cam_intrinsics, cam_R, cam_T)
+        target_orig = revert_to_original_position(target, face_box_tl, cam_intrinsics, cam_R, cam_T)
+
+        if qualitative:
+            raw = data["frames"][0].cpu().numpy()
+            raw_gaze = raw.copy()
+
+            l_eyeball_centre_screen_gt = data["left_eyeball_2d_crop"][0].cpu().numpy()
+            r_eyeball_centre_screen_gt = data["right_eyeball_2d_crop"][0].cpu().numpy()
+            target_screen_gt = data["target_2d_crop"][0].cpu().numpy()
+            l_eyeball_centre_screen = world_to_img(l_eyeball_centre, cam_intrinsics, cam_R, cam_T)[0, :2]
+            r_eyeball_centre_screen = world_to_img(r_eyeball_centre, cam_intrinsics, cam_R, cam_T)[0, :2]
+            target_screen = world_to_img(target, cam_intrinsics, cam_R, cam_T)[0, :2]
+
+            draw_gaze(raw_gaze, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
+                      l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen)
+
+            rendered = (results["img"][0].cpu().numpy() * 255).astype(np.uint8)
+            rendered_none_idx = np.all(rendered == [0, 255, 0], axis=2)
+            rendered[rendered_none_idx] = cv2.resize(raw, (224, 224))[rendered_none_idx]
+
+            draw_gaze(rendered, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
+                      l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen)
+
+            raw = cv2.resize(raw, (512, 512))
+            rendered = cv2.resize(rendered, (512, 512))
+            raw_gaze = cv2.resize(raw_gaze, (512, 512))
+            combined = np.concatenate([raw, rendered, raw_gaze], axis=1)
+
+            rendered_video_writer.write(combined)
+
+            # cv2.imshow("1", combined)
+            # cv2.waitKey(100)
 
         # Calculate angle errors.
         l_gaze_angle_errors_rot.append(
-            get_angle(l_gaze_rot - l_eyeball_centre,
+            get_angle(l_gaze_rot - l_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["left_eyeball_3d"].cpu().numpy()))
         r_gaze_angle_errors_rot.append(
-            get_angle(r_gaze_rot - r_eyeball_centre,
+            get_angle(r_gaze_rot - r_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
 
         l_gaze_angle_errors_tgt.append(
-            get_angle(target - l_eyeball_centre,
+            get_angle(target_orig - l_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["left_eyeball_3d"].cpu().numpy()))
         r_gaze_angle_errors_tgt.append(
-            get_angle(target - r_eyeball_centre,
+            get_angle(target_orig - r_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
 
         face_point = (data["right_eyeball_3d"].cpu().numpy() + data["left_eyeball_3d"].cpu().numpy()) / 2
         f_gaze_angle_errors_tgt.append(
-            get_angle(target - face_point,
+            get_angle(target_orig - face_point,
                       data["target_3d"].cpu().numpy() - face_point))
+
+    rendered_video_writer.release()
 
     logging.info("Left gaze rot error, mean: " + str(np.mean(l_gaze_angle_errors_rot)) +
                  ", std: " + str(np.std(l_gaze_angle_errors_rot)) +
@@ -157,6 +207,21 @@ def draw_distribution_scatter(pred, gt):
     plt.show()
 
 
+def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
+              l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen):
+    def draw_line(origin, target, colour):
+        cv2.line(image,
+                 (int(origin[0] / FACE_CROP_SIZE * image.shape[0]),
+                  int(origin[1] / FACE_CROP_SIZE * image.shape[1])),
+                 (int(target[0] / FACE_CROP_SIZE * image.shape[0]),
+                  int(target[1] / FACE_CROP_SIZE * image.shape[1])),
+                 color=colour, lineType=cv2.LINE_AA, thickness=1)
+    draw_line(l_eyeball_centre_screen_gt, target_screen_gt, (0, 255, 0))
+    draw_line(r_eyeball_centre_screen_gt, target_screen_gt, (0, 255, 0))
+    draw_line(l_eyeball_centre_screen, target_screen, (0, 0, 255))
+    draw_line(r_eyeball_centre_screen, target_screen, (0, 0, 255))
+
+
 if __name__ == '__main__':
     if os.path.exists(LOGS_PATH + NAME + "/eval.txt"):
         os.remove(LOGS_PATH + NAME + "/eval.txt")
@@ -168,4 +233,4 @@ if __name__ == '__main__':
         format="%(asctime)s %(levelname)-8s %(message)s", datefmt="[%Y-%m-%d %H:%M:%S]")
     console_handler.setLevel(logging.INFO)
 
-    evaluate()
+    evaluate(qualitative=True)
