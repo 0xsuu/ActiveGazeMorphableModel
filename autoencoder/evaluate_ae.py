@@ -15,14 +15,14 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v3"
+NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2by5"
 
 
 def evaluate(qualitative=False):
     logging.info(NAME)
     
     model = Autoencoder()
-    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_final.pt")
+    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
 
     # Version change fixing. Modify the saved state dict for backward compatibility.
     new_saved_state_dict = OrderedDict()

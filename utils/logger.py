@@ -80,6 +80,10 @@ class TrainingLogger(object):
             self.running_metrics.update(self.epoch_logs)
             self.tfb_writer.add_hparams(self.hparam_dict, self.running_metrics, run_name="Best eval")
 
+        if epoch % 10 == 0:
+            torch.save(log_dict["model_weights"], self.log_name_dir + "model_" + str(epoch) + ".pt")
+            logging.info("Model weights saved.")
+
         # Reset for next epoch.
         self.epoch_logs.clear()
         self.total_size.clear()

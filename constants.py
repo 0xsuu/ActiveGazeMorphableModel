@@ -15,7 +15,7 @@ PROJECT_PATH = os.path.abspath(os.path.join(os.path.realpath(__file__), os.pardi
 DATASETS_PATH = PROJECT_PATH + "datasets/"
 
 EYEDIAP_PATH = "Z:/research/datasets/EYEDIAP/"
-FLAME_PATH = "Z:/research/datasets/FLAME/"
+FLAME_PATH = DATASETS_PATH + "FLAME/"
 
 LOGS_PATH = PROJECT_PATH + "logs/"
 

@@ -220,14 +220,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2by5"
+    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2x2_resnet50"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
     args.lambda1 = 1.
-    args.lambda2 = 1.
+    args.lambda2 = 10.
 
     args.batch_size = 32
 
