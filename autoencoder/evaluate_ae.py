@@ -1,30 +1,31 @@
 
 import logging
+from collections import OrderedDict
 import cv2
 import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
-
 import numpy as np
 from torchvision.transforms import Resize
 from tqdm import tqdm
+from psbody.mesh import Mesh
 
 from autoencoder.model import Autoencoder
 from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v1_mix_server_steplr_lmd1x10"
+NAME = "v3"
 
 
 def evaluate(qualitative=False):
     logging.info(NAME)
     
     model = Autoencoder()
-    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
+    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_final.pt")
 
-    # Version change fixing.
-    new_saved_state_dict = {}
+    # Version change fixing. Modify the saved state dict for backward compatibility.
+    new_saved_state_dict = OrderedDict()
     for k, v in saved_state_dict.items():
         if "encoder" in k and "net" not in k:
             new_saved_state_dict[".".join(["encoder", "net"] + k.split(".")[1:])] = v
@@ -32,12 +33,15 @@ def evaluate(qualitative=False):
             new_saved_state_dict[k] = v
     saved_state_dict = new_saved_state_dict
 
+    # Load checkpoint and set to evaluate.
     model.load_state_dict(saved_state_dict)
     model.eval()
 
-    test_data = EYEDIAP(partition="test", head_movement=["M", "S"])
+    # Load test dataset.
+    test_data = EYEDIAP(partition="test", eval_subject=16, head_movement=["M", "S"])
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
 
+    # Initiate video writer. The qualitative result will be saved in a video.
     rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_full.mov",
                                             cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
 
@@ -62,7 +66,7 @@ def evaluate(qualitative=False):
         with torch.no_grad():
             results = model(gt_img_input, camera_parameters)
 
-        # Revert to original position.
+        # Extract forward results.
         face_box_tl = data["face_box_tl"].cpu().numpy()
         l_eyeball_centre = results["l_eyeball_centre"][0].cpu().numpy()
         r_eyeball_centre = results["r_eyeball_centre"][0].cpu().numpy()
@@ -84,6 +88,10 @@ def evaluate(qualitative=False):
         #     + r_eyeball_centre
 
         target = results["gaze_point_mid"][0].cpu().numpy()
+        target_l = results["gaze_point_l"][0].cpu().numpy()
+        target_r = results["gaze_point_r"][0].cpu().numpy()
+
+        # Process camera parameters.
         cam_R, cam_T, cam_K = camera_parameters
         cam_intrinsics = cam_K[0, :3, :3]
         cam_intrinsics[2, 2] = 1.
@@ -93,11 +101,15 @@ def evaluate(qualitative=False):
         r_gaze_rot_axis_pred.append(results["right_eye_rotation"][0].cpu().numpy())
         l_gaze_rot_axis_gt.append(data["left_eyeball_rotation_crop"][0].cpu().numpy())
         r_gaze_rot_axis_gt.append(data["right_eyeball_rotation_crop"][0].cpu().numpy())
+
+        # Revert cropping.
         l_eyeball_centre_orig = revert_to_original_position(l_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
         r_eyeball_centre_orig = revert_to_original_position(r_eyeball_centre, face_box_tl, cam_intrinsics, cam_R, cam_T)
         l_gaze_rot = revert_to_original_position(l_gaze_rot, face_box_tl, cam_intrinsics, cam_R, cam_T)
         r_gaze_rot = revert_to_original_position(r_gaze_rot, face_box_tl, cam_intrinsics, cam_R, cam_T)
         target_orig = revert_to_original_position(target, face_box_tl, cam_intrinsics, cam_R, cam_T)
+        target_orig_l = revert_to_original_position(target_l, face_box_tl, cam_intrinsics, cam_R, cam_T)
+        target_orig_r = revert_to_original_position(target_r, face_box_tl, cam_intrinsics, cam_R, cam_T)
 
         if qualitative:
             raw = data["frames"][0].cpu().numpy()
@@ -109,16 +121,18 @@ def evaluate(qualitative=False):
             l_eyeball_centre_screen = world_to_img(l_eyeball_centre, cam_intrinsics, cam_R, cam_T)[0, :2]
             r_eyeball_centre_screen = world_to_img(r_eyeball_centre, cam_intrinsics, cam_R, cam_T)[0, :2]
             target_screen = world_to_img(target, cam_intrinsics, cam_R, cam_T)[0, :2]
+            target_screen_l = world_to_img(target_l, cam_intrinsics, cam_R, cam_T)[0, :2]
+            target_screen_r = world_to_img(target_r, cam_intrinsics, cam_R, cam_T)[0, :2]
 
             draw_gaze(raw_gaze, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
-                      l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen)
+                      l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
 
             rendered = (results["img"][0].cpu().numpy() * 255).astype(np.uint8)
             rendered_none_idx = np.all(rendered == [0, 255, 0], axis=2)
             rendered[rendered_none_idx] = cv2.resize(raw, (224, 224))[rendered_none_idx]
 
-            draw_gaze(rendered, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
-                      l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen)
+            # draw_gaze(rendered, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
+            #           l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
 
             raw = cv2.resize(raw, (512, 512))
             rendered = cv2.resize(rendered, (512, 512))
@@ -176,15 +190,26 @@ def evaluate(qualitative=False):
                  ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
                  ", median: " + str(np.median(f_gaze_angle_errors_tgt)))
 
-    l_gaze_rot_axis_pred = np.stack(l_gaze_rot_axis_pred)
-    r_gaze_rot_axis_pred = np.stack(r_gaze_rot_axis_pred)
-    l_gaze_rot_axis_gt = np.stack(l_gaze_rot_axis_gt)
-    r_gaze_rot_axis_gt = np.stack(r_gaze_rot_axis_gt)
-    draw_distribution_scatter(l_gaze_rot_axis_pred, l_gaze_rot_axis_gt)
-    draw_distribution_scatter(r_gaze_rot_axis_pred, r_gaze_rot_axis_gt)
+    # l_gaze_rot_axis_pred = np.stack(l_gaze_rot_axis_pred)
+    # r_gaze_rot_axis_pred = np.stack(r_gaze_rot_axis_pred)
+    # l_gaze_rot_axis_gt = np.stack(l_gaze_rot_axis_gt)
+    # r_gaze_rot_axis_gt = np.stack(r_gaze_rot_axis_gt)
+    # draw_distribution_scatter(l_gaze_rot_axis_pred, l_gaze_rot_axis_gt)
+    # draw_distribution_scatter(r_gaze_rot_axis_pred, r_gaze_rot_axis_gt)
 
 
 def revert_to_original_position(point_3d, face_box_tl, cam_intrinsics, cam_R, cam_T):
+    """
+    Project world coordinate system 3D points onto image plane, apply cropping offset,
+    then project back to world coordinate system.
+
+    :param point_3d:
+    :param face_box_tl:
+    :param cam_intrinsics:
+    :param cam_R:
+    :param cam_T:
+    :return:
+    """
     point2dz = world_to_img(point_3d, cam_intrinsics, cam_R, cam_T)
     point2dz[:, :2] += face_box_tl
     point3d_orig = img_to_world(point2dz, cam_intrinsics, cam_R, cam_T)
@@ -208,7 +233,22 @@ def draw_distribution_scatter(pred, gt):
 
 
 def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
-              l_eyeball_centre_screen, target_screen, r_eyeball_centre_screen):
+              l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r):
+    """
+    Draw the ground truth and prediction gaze direction in 2D on the given image.
+
+    Ground truth gaze is in green, predicted gaze is in red.
+
+    :param image: Image to draw.
+    :param l_eyeball_centre_screen_gt: Ground truth left eyeball centre coordinate in screen coordinate system.
+    :param target_screen_gt: Ground truth target coordinate in screen coordinate system.
+    :param r_eyeball_centre_screen_gt: Ground truth right eyeball centre coordinate in screen coordinate system.
+    :param l_eyeball_centre_screen: Predicted left eyeball centre in screen coordinate system.
+    :param target_screen_l: Predicted left target coordinate in screen coordinate system.
+    :param r_eyeball_centre_screen: Predicted right eyeball centre coordinate in screen coordinate system.
+    :param target_screen_r: Predicted right target coordinate in screen coordinate system.
+    :return: None
+    """
     def draw_line(origin, target, colour):
         cv2.line(image,
                  (int(origin[0] / FACE_CROP_SIZE * image.shape[0]),
@@ -218,8 +258,8 @@ def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_cen
                  color=colour, lineType=cv2.LINE_AA, thickness=1)
     draw_line(l_eyeball_centre_screen_gt, target_screen_gt, (0, 255, 0))
     draw_line(r_eyeball_centre_screen_gt, target_screen_gt, (0, 255, 0))
-    draw_line(l_eyeball_centre_screen, target_screen, (0, 0, 255))
-    draw_line(r_eyeball_centre_screen, target_screen, (0, 0, 255))
+    draw_line(l_eyeball_centre_screen, target_screen_l, (0, 0, 255))
+    draw_line(r_eyeball_centre_screen, target_screen_r, (0, 0, 255))
 
 
 if __name__ == '__main__':

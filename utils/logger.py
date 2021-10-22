@@ -75,7 +75,7 @@ class TrainingLogger(object):
             self.running_metrics["best_eval"] = self.epoch_logs["loss/eval"]
             torch.save(log_dict["model_weights"], self.log_name_dir + "model_best.pt")
             # torch.save(log_dict["optimiser_weights"], self.log_name_dir + "optimiser_best.pt")
-            logging.info("Best model & optimiser weights saved.")
+            logging.info("Best model weights saved.")
 
             self.running_metrics.update(self.epoch_logs)
             self.tfb_writer.add_hparams(self.hparam_dict, self.running_metrics, run_name="Best eval")

@@ -26,7 +26,7 @@ def train():
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
-    optimiser = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimiser = torch.optim.Adam(model.encoder.parameters(), lr=1e-4, weight_decay=1e-4)
     if args.lr_scheduler == "step":
         scheduler = StepLR(optimiser, 25, 0.9)
     else:
@@ -58,8 +58,10 @@ def train():
             loss_pixel * args.lambda1 + loss_landmark * args.lambda2 + loss_eye * args.lambda3 + \
             loss_gaze_target * args.lambda4 + loss_gaze_div * args.lambda5 + loss_gaze_pose * args.lambda6 + \
             reg_shape_param * args.lambda7 + reg_albedo_param * args.lambda8
+        save_criteria = loss_eye.item() * args.lambda3 + loss_gaze_target.item() * args.lambda4 + \
+            loss_gaze_div.item() * args.lambda5 + loss_gaze_pose * args.lambda6
 
-        training_logger.log_batch_loss("loss", loss_eye.item() + loss_gaze_target.item() + loss_gaze_div.item(),
+        training_logger.log_batch_loss("loss", save_criteria,
                                        partition_, batch_size)
 
         return total_loss_weighted
@@ -141,6 +143,7 @@ def train():
         epoch_end_time = time.time()
         logging.info("Time left: " + time_format((epoch_end_time - epoch_start_time) * (args.epochs - epoch)))
 
+    torch.save(model.state_dict(), log_name_dir + "model_final.pt")
     full_end_time = time.time()
     logging.info("Total training time: " + time_format(full_end_time - full_start_time))
 
@@ -174,7 +177,7 @@ if __name__ == '__main__':
     # Loss function hyper-parameters.
     parser.add_argument("--lambda1", type=float, default=1.,
                         help="Lambda to balance loss function.")
-    parser.add_argument("--lambda2", type=float, default=0.1,
+    parser.add_argument("--lambda2", type=float, default=1.,
                         help="Lambda to balance loss functions.")
     parser.add_argument("--lambda3", type=float, default=100.,
                         help="Lambda to balance loss function.")
@@ -194,6 +197,21 @@ if __name__ == '__main__':
                         help="Learning rate scheduler, choose from: (cos) for (CosineAnnealingLR), "
                              "(step) for (StepLR).")
 
+    """ Ablation studies.
+    """
+    parser.add_argument("--pixel_loss", type=bool, default=True,
+                        help="")
+    parser.add_argument("--landmark_loss", type=bool, default=True,
+                        help="")
+    parser.add_argument("--eye_loss", type=bool, default=True,
+                        help="")
+    parser.add_argument("--gaze_tgt_loss", type=bool, default=True,
+                        help="")
+    parser.add_argument("--gaze_div_loss", type=bool, default=True,
+                        help="")
+    parser.add_argument("--gaze_pose_loss", type=bool, default=True,
+                        help="")
+
     """ Misc
     """
     parser.add_argument("--logging_level", type=str, default="INFO",
@@ -202,11 +220,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v1_m"
+    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2by5"
     args.epochs = 150
     args.seed = 1
-    args.lr = 1e-4
-    args.lr_scheduler = "step"
+    args.lr = 5e-5
+    args.lr_scheduler = None
+
+    args.lambda1 = 1.
+    args.lambda2 = 1.
 
     args.batch_size = 32
 
@@ -242,3 +263,9 @@ if __name__ == '__main__':
 
     training_logger = TrainingLogger(log_name_dir, args)
     train()
+
+    """
+    v1: initial version.
+    v2: added eyeball rotation correction regarding head pose.
+    v3: fix bugs from v2.
+    """
