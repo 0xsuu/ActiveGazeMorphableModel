@@ -162,6 +162,14 @@ def time_format(time_diff):
     return "{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), seconds)
 
 
+def logging_source_code(ae):
+    # Logging file and model information.
+    logging.debug(ae)
+    with open(PROJECT_PATH + "train_autoencoder.py", "r", encoding="utf-8") as f:
+        logging.debug("*** File content for train_autoencoder.py ***")
+        logging.debug("".join(f.readlines()))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train Autoencoder")
     """ Experiment configurations.
@@ -228,14 +236,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2x2_nogazeangleloss"
+    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2d1_ltgteyex10_nogazeangleloss"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
     args.lambda1 = 1.
-    args.lambda2 = 10.
+    args.lambda2 = 1.
+
+    args.lambda3 *= 10.
+    args.lambda4 *= 10.
 
     args.batch_size = 32
 
