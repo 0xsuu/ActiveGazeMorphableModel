@@ -6,3 +6,4 @@ logs
 datasets
 *.pt
 !README.md
+*.pth

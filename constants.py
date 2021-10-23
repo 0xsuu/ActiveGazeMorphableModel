@@ -16,6 +16,7 @@ DATASETS_PATH = PROJECT_PATH + "datasets/"
 
 EYEDIAP_PATH = "Z:/research/datasets/EYEDIAP/"
 FLAME_PATH = DATASETS_PATH + "FLAME/"
+XGAZE_PATH = DATASETS_PATH + "eth-xgaze/"
 
 LOGS_PATH = PROJECT_PATH + "logs/"
 

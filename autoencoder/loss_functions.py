@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 
 def pixel_loss(image_pred, image_gt):
@@ -34,3 +35,15 @@ def gaze_pose_loss(left_gaze_rot_pred, left_gaze_rot_gt, right_gaze_rot_pred, ri
 
 def parameters_regulariser(shape_parameters):
     return torch.mean(shape_parameters ** 2)
+
+
+def gaze_degree_error(left_eye_centre_pred, right_eye_centre_pred, left_eye_centre_gt, right_eye_centre_gt,
+                      gaze_target_pred, gaze_target_gt):
+    with torch.no_grad():
+        gaze_vec_pred = gaze_target_pred.detach() - (left_eye_centre_pred.detach() + right_eye_centre_pred.detach()) / 2
+        gaze_vec_gt = gaze_target_gt.detach() - (left_eye_centre_gt.detach() + right_eye_centre_gt.detach()) / 2
+        gaze_vec_pred = gaze_vec_pred.cpu().numpy()
+        gaze_vec_gt = gaze_vec_gt.cpu().numpy()
+        return np.rad2deg(np.arccos(np.sum(gaze_vec_pred * gaze_vec_gt, axis=1) /
+                                    (np.linalg.norm(gaze_vec_pred, axis=1) * np.linalg.norm(gaze_vec_gt, axis=1))))\
+            .mean()

@@ -12,7 +12,7 @@ import logging
 import shutil
 
 from autoencoder.loss_functions import pixel_loss, landmark_loss, eye_loss, gaze_target_loss, gaze_divergence_loss, \
-    parameters_regulariser, gaze_pose_loss
+    parameters_regulariser, gaze_pose_loss, gaze_degree_error
 from autoencoder.model import Autoencoder
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
@@ -39,8 +39,8 @@ def train():
                             data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
         loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
         loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
-        loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
-                                        results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
+        # loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
+        #                                 results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
         reg_shape_param = parameters_regulariser(results_["shape_parameters"])
         reg_albedo_param = parameters_regulariser(results_["albedo_parameters"])
 
@@ -50,18 +50,25 @@ def train():
         training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
         training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
         training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
-        training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
+        # training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
         training_logger.log_batch_loss("shape_param_reg", reg_shape_param.item(), partition_, batch_size)
         training_logger.log_batch_loss("albedo_para_reg", reg_albedo_param.item(), partition_, batch_size)
 
         total_loss_weighted = \
             loss_pixel * args.lambda1 + loss_landmark * args.lambda2 + loss_eye * args.lambda3 + \
-            loss_gaze_target * args.lambda4 + loss_gaze_div * args.lambda5 + loss_gaze_pose * args.lambda6 + \
+            loss_gaze_target * args.lambda4 + loss_gaze_div * args.lambda5 + \
             reg_shape_param * args.lambda7 + reg_albedo_param * args.lambda8
-        save_criteria = loss_eye.item() * args.lambda3 + loss_gaze_target.item() * args.lambda4 + \
-            loss_gaze_div.item() * args.lambda5 + loss_gaze_pose * args.lambda6
+        training_logger.log_batch_loss("total_loss_weighted", total_loss_weighted.item(), partition_, batch_size)
+        # early_stopping_criteria = loss_eye.item() * args.lambda3 + loss_gaze_target.item() * args.lambda4 + \
+        #     loss_gaze_div.item() * args.lambda5
+        early_stopping_criteria = gaze_degree_error(results_["l_eyeball_centre"].squeeze(1),
+                                                    results_["r_eyeball_centre"].squeeze(1),
+                                                    data_["left_eyeball_3d_crop"],
+                                                    data_["right_eyeball_3d_crop"],
+                                                    results_["gaze_point_mid"].squeeze(1),
+                                                    data_["target_3d_crop"])
 
-        training_logger.log_batch_loss("loss", save_criteria,
+        training_logger.log_batch_loss("loss", early_stopping_criteria,
                                        partition_, batch_size)
 
         return total_loss_weighted
@@ -74,6 +81,7 @@ def train():
 
         """ Train.
         """
+        gt_img_input, results = None, None
         for data in tqdm(train_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
@@ -220,7 +228,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2x2_resnet50"
+    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2x2_nogazeangleloss"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5

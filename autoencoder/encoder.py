@@ -10,13 +10,13 @@ class Encoder(nn.Module):
     def __init__(self, out_channel):
         super().__init__()
 
-        # # ResNet18.
-        # self.net = models.ResNet(BasicBlock, [2, 2, 2, 2], num_classes=out_channel).to(device)
-        # pretrain_state_dict = \
-        #     load_state_dict_from_url(model_urls["resnet18"], model_dir="autoencoder/", progress=True)
-        # ResNet50.
-        self.net = models.ResNet(Bottleneck, [3, 4, 6, 3], num_classes=out_channel).to(device)
-        pretrain_state_dict = load_state_dict_from_url(model_urls["resnet50"], model_dir="autoencoder/", progress=True)
+        # ResNet18.
+        self.net = models.ResNet(BasicBlock, [2, 2, 2, 2], num_classes=out_channel).to(device)
+        pretrain_state_dict = \
+            load_state_dict_from_url(model_urls["resnet18"], model_dir="autoencoder/", progress=True)
+        # # ResNet50.
+        # self.net = models.ResNet(Bottleneck, [3, 4, 6, 3], num_classes=out_channel).to(device)
+        # pretrain_state_dict = load_state_dict_from_url(model_urls["resnet50"], model_dir="autoencoder/", progress=True)
 
         pretrain_state_dict.pop("fc.weight")
         pretrain_state_dict.pop("fc.bias")
