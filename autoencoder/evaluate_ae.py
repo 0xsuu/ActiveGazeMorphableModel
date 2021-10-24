@@ -15,7 +15,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2by5"
+NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2d1_ltgtx10_nogazeangleloss"
 
 
 def evaluate(qualitative=False):
@@ -45,14 +45,17 @@ def evaluate(qualitative=False):
     rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_full.mov",
                                             cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
 
-    l_gaze_angle_errors_rot = []
+    l_gaze_angle_errors_rot = []  # Gaze angle error calculated by rotation ground truth.
     r_gaze_angle_errors_rot = []
     l_gaze_rot_axis_pred = []
     r_gaze_rot_axis_pred = []
     l_gaze_rot_axis_gt = []
     r_gaze_rot_axis_gt = []
-    l_gaze_angle_errors_tgt = []
+    l_gaze_angle_errors_tgt = []  # Gaze angle error calculated by eye centre to target vector ground truth.
     r_gaze_angle_errors_tgt = []
+    # Gaze angle error calculated by eye centre to target vector ground truth. Eye centre ground truth is available.
+    l_gaze_angle_errors_tgt_gt = []
+    r_gaze_angle_errors_tgt_gt = []
     f_gaze_angle_errors_tgt = []
     for data in tqdm(test_loader):
         gt_img = data["frames"].to(torch.float32) / 255.
@@ -159,6 +162,13 @@ def evaluate(qualitative=False):
             get_angle(target_orig - r_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
 
+        l_gaze_angle_errors_tgt_gt.append(
+            get_angle(target_orig - data["left_eyeball_3d"].cpu().numpy(),
+                      data["target_3d"].cpu().numpy() - data["left_eyeball_3d"].cpu().numpy()))
+        r_gaze_angle_errors_tgt_gt.append(
+            get_angle(target_orig - data["right_eyeball_3d"].cpu().numpy(),
+                      data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
+
         face_point = (data["right_eyeball_3d"].cpu().numpy() + data["left_eyeball_3d"].cpu().numpy()) / 2
         f_gaze_angle_errors_tgt.append(
             get_angle(target_orig - face_point,
@@ -166,25 +176,9 @@ def evaluate(qualitative=False):
 
     rendered_video_writer.release()
 
-    logging.info("Left gaze rot error, mean: " + str(np.mean(l_gaze_angle_errors_rot)) +
-                 ", std: " + str(np.std(l_gaze_angle_errors_rot)) +
-                 ", median: " + str(np.median(l_gaze_angle_errors_rot)))
-    logging.info("Right gaze rot error, mean: " + str(np.mean(r_gaze_angle_errors_rot)) +
-                 ", std: " + str(np.std(r_gaze_angle_errors_rot)) +
-                 ", median: " + str(np.median(r_gaze_angle_errors_rot)))
-    logging.info("Total gaze rot error, mean: " + str(np.mean(l_gaze_angle_errors_rot + r_gaze_angle_errors_rot)) +
-                 ", std: " + str(np.std(l_gaze_angle_errors_rot + r_gaze_angle_errors_rot)) +
-                 ", median: " + str(np.median(l_gaze_angle_errors_rot + r_gaze_angle_errors_rot)))
-
-    logging.info("Left gaze tgt error, mean: " + str(np.mean(l_gaze_angle_errors_tgt)) +
-                 ", std: " + str(np.std(l_gaze_angle_errors_tgt)) +
-                 ", median: " + str(np.median(l_gaze_angle_errors_tgt)))
-    logging.info("Right gaze tgt error, mean: " + str(np.mean(r_gaze_angle_errors_tgt)) +
-                 ", std: " + str(np.std(r_gaze_angle_errors_tgt)) +
-                 ", median: " + str(np.median(r_gaze_angle_errors_tgt)))
-    logging.info("Total gaze tgt error, mean: " + str(np.mean(l_gaze_angle_errors_tgt + r_gaze_angle_errors_tgt)) +
-                 ", std: " + str(np.std(l_gaze_angle_errors_tgt + r_gaze_angle_errors_tgt)) +
-                 ", median: " + str(np.median(l_gaze_angle_errors_tgt + r_gaze_angle_errors_tgt)))
+    report_two_eye_gaze_angle_error("rot", l_gaze_angle_errors_rot, r_gaze_angle_errors_rot)
+    report_two_eye_gaze_angle_error("tgt", l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt)
+    report_two_eye_gaze_angle_error("tgt_gt", l_gaze_angle_errors_tgt_gt, r_gaze_angle_errors_tgt_gt)
 
     logging.info("Face gaze tgt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt)) +
                  ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
@@ -196,6 +190,18 @@ def evaluate(qualitative=False):
     # r_gaze_rot_axis_gt = np.stack(r_gaze_rot_axis_gt)
     # draw_distribution_scatter(l_gaze_rot_axis_pred, l_gaze_rot_axis_gt)
     # draw_distribution_scatter(r_gaze_rot_axis_pred, r_gaze_rot_axis_gt)
+
+
+def report_two_eye_gaze_angle_error(name, l_gaze_errors, r_gaze_errors):
+    logging.info("Left gaze " + name + " error, mean: " + str(np.mean(l_gaze_errors)) +
+                 ", std: " + str(np.std(l_gaze_errors)) +
+                 ", median: " + str(np.median(l_gaze_errors)))
+    logging.info("Right gaze " + name + " error, mean: " + str(np.mean(r_gaze_errors)) +
+                 ", std: " + str(np.std(r_gaze_errors)) +
+                 ", median: " + str(np.median(r_gaze_errors)))
+    logging.info("Total gaze " + name + " error, mean: " + str(np.mean(l_gaze_errors + r_gaze_errors)) +
+                 ", std: " + str(np.std(l_gaze_errors + r_gaze_errors)) +
+                 ", median: " + str(np.median(l_gaze_errors + r_gaze_errors)))
 
 
 def revert_to_original_position(point_3d, face_box_tl, cam_intrinsics, cam_R, cam_T):

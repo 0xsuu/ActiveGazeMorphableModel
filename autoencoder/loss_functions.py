@@ -44,6 +44,7 @@ def gaze_degree_error(left_eye_centre_pred, right_eye_centre_pred, left_eye_cent
         gaze_vec_gt = gaze_target_gt.detach() - (left_eye_centre_gt.detach() + right_eye_centre_gt.detach()) / 2
         gaze_vec_pred = gaze_vec_pred.cpu().numpy()
         gaze_vec_gt = gaze_vec_gt.cpu().numpy()
-        return np.rad2deg(np.arccos(np.sum(gaze_vec_pred * gaze_vec_gt, axis=1) /
-                                    (np.linalg.norm(gaze_vec_pred, axis=1) * np.linalg.norm(gaze_vec_gt, axis=1))))\
-            .mean()
+
+        gaze_rad_error = np.arccos(np.sum(gaze_vec_pred * gaze_vec_gt, axis=1) /
+                                   (np.linalg.norm(gaze_vec_pred, axis=1) * np.linalg.norm(gaze_vec_gt, axis=1)))
+        return np.rad2deg(np.nan_to_num(gaze_rad_error)).mean()

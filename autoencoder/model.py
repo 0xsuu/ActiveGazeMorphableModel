@@ -11,12 +11,12 @@ from utils.rotations import rotation_matrix_from_axis_combined
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, render_image=True):
+    def __init__(self, render_image=True, dropout=0.):
         super().__init__()
 
         self.render_image = render_image
 
-        self.encoder = Encoder(400 + 145 + 3 + 3 + 1 + 2 + 2)
+        self.encoder = Encoder(400 + 145 + 3 + 3 + 1 + 2 + 2, dropout=dropout).to(device)
 
         self.face_model = FlameModel(FLAME_PATH + "FLAME2020/generic_model.pkl",
                                      FLAME_PATH + "albedoModel2020_FLAME_albedoPart.npz",

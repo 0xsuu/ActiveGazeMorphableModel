@@ -20,7 +20,7 @@ from constants import *
 
 
 def train():
-    model = Autoencoder()
+    model = Autoencoder(dropout=args.dropout)
     train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
     test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
@@ -137,9 +137,10 @@ def train():
         # for lm in results["face_landmarks"][j]:
         #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 0, 255))
 
-        cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
-        cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
-        cv2.waitKey(1)
+        if os.name == 'nt':
+            cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
+            cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
+            cv2.waitKey(1)
         model.train()
 
         """ Epoch ends.
@@ -189,6 +190,8 @@ if __name__ == '__main__':
                         help="Batch size for training.")
     parser.add_argument("--test_batch_size", type=int, default=32, metavar="N",
                         help="Batch size for evaluating.")
+    parser.add_argument("--dropout", type=float, default=0., metavar="N",
+                        help="Dropout rate.")
 
     # Loss function hyper-parameters.
     parser.add_argument("--lambda1", type=float, default=1.,
@@ -236,17 +239,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2d1_ltgteyex10_nogazeangleloss"
+    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
     args.lambda1 = 1.
-    args.lambda2 = 1.
+    args.lambda2 = 0.5
 
     args.lambda3 *= 10.
     args.lambda4 *= 10.
+
+    args.lambda7 *= 10.
 
     args.batch_size = 32
 
