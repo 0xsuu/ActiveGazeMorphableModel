@@ -1,6 +1,8 @@
-
+import json
 import logging
 from collections import OrderedDict
+from types import SimpleNamespace
+
 import cv2
 import torch
 from matplotlib import pyplot as plt
@@ -15,23 +17,25 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2d1_ltgtx10_nogazeangleloss"
+NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal_swin"
 
 
 def evaluate(qualitative=False):
     logging.info(NAME)
-    
-    model = Autoencoder()
+    with open(LOGS_PATH + NAME + "/config.json", "r") as f:
+        args = SimpleNamespace(**json.load(f))
+
+    model = Autoencoder(args)
     saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
 
-    # Version change fixing. Modify the saved state dict for backward compatibility.
-    new_saved_state_dict = OrderedDict()
-    for k, v in saved_state_dict.items():
-        if "encoder" in k and "net" not in k:
-            new_saved_state_dict[".".join(["encoder", "net"] + k.split(".")[1:])] = v
-        else:
-            new_saved_state_dict[k] = v
-    saved_state_dict = new_saved_state_dict
+    # # Version change fixing. Modify the saved state dict for backward compatibility.
+    # new_saved_state_dict = OrderedDict()
+    # for k, v in saved_state_dict.items():
+    #     if "encoder" in k and "net" not in k:
+    #         new_saved_state_dict[".".join(["encoder", "net"] + k.split(".")[1:])] = v
+    #     else:
+    #         new_saved_state_dict[k] = v
+    # saved_state_dict = new_saved_state_dict
 
     # Load checkpoint and set to evaluate.
     model.load_state_dict(saved_state_dict)

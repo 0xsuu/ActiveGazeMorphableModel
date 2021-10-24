@@ -20,7 +20,7 @@ from constants import *
 
 
 def train():
-    model = Autoencoder(dropout=args.dropout)
+    model = Autoencoder(args)
     train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
     test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
@@ -181,6 +181,8 @@ if __name__ == '__main__':
                         help="Random seed (default: 1).")
     parser.add_argument("-o", "--override", type=bool, default=False,
                         help="Override log directory.")
+    parser.add_argument("--network", type=str, default=0., metavar="ResNet18",
+                        help="Backbone network.")
 
     """ Hyper-parameters.
     """
@@ -190,8 +192,6 @@ if __name__ == '__main__':
                         help="Batch size for training.")
     parser.add_argument("--test_batch_size", type=int, default=32, metavar="N",
                         help="Batch size for evaluating.")
-    parser.add_argument("--dropout", type=float, default=0., metavar="N",
-                        help="Dropout rate.")
 
     # Loss function hyper-parameters.
     parser.add_argument("--lambda1", type=float, default=1.,
@@ -228,7 +228,7 @@ if __name__ == '__main__':
                         help="")
     parser.add_argument("--gaze_div_loss", type=bool, default=True,
                         help="")
-    parser.add_argument("--gaze_pose_loss", type=bool, default=True,
+    parser.add_argument("--gaze_pose_loss", type=bool, default=False,
                         help="")
 
     """ Misc
@@ -239,11 +239,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v3_nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal"
+    args.name = "v4_resnet"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
+
+    args.network = "ResNet18"
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -292,4 +294,5 @@ if __name__ == '__main__':
     v1: initial version.
     v2: added eyeball rotation correction regarding head pose.
     v3: fix bugs from v2.
+    v4: v3 + nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal and new dataset without outliers.
     """
