@@ -281,7 +281,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v4_swin_abl_pix"
+    args.name = "v4_swin_abl_lm"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
@@ -289,7 +289,7 @@ if __name__ == '__main__':
 
     args.network = "Swin"
     args.eye_patch = False
-    args.pixel_loss = False
+    args.landmark_loss = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
