@@ -189,6 +189,8 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
     else:
         frame_valid_list = [True] * len(eye_content)
 
+    new_frame_valid_list = []  # Contains invalid face detections.
+
     marked_video_writer = cv2.VideoWriter(data_folder_path + feed + "_marked.mov",
                                           cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (640, 480))
     fld = FaceLandmarkDetector()
@@ -231,6 +233,20 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
             result_dict["face_box_tl"].append(face_top_left_coord)
             result_dict["face_landmarks"].append(np.concatenate(face_lms))
             result_dict["face_landmarks_crop"].append(np.concatenate(face_lms) - face_top_left_coord)
+
+            # Get eye images.
+            mid_point_l = np.mean(face_lms[-2], axis=0)
+            half_width_l = np.max(np.abs(face_lms[-2] - mid_point_l)) + 5
+            img_left_eye = img[int(mid_point_l[1] - half_width_l):int(mid_point_l[1] + half_width_l),
+                               int(mid_point_l[0] - half_width_l):int(mid_point_l[0] + half_width_l)].copy()
+            mid_point_r = np.mean(face_lms[-1], axis=0)
+            half_width_r = np.max(np.abs(face_lms[-1] - mid_point_r)) + 5
+            img_right_eye = img[int(mid_point_r[1] - half_width_r):int(mid_point_r[1] + half_width_r),
+                                int(mid_point_r[0] - half_width_r):int(mid_point_r[0] + half_width_r)].copy()
+            result_dict["left_eye_images"].append(cv2.resize(img_left_eye, (56, 56)))
+            result_dict["right_eye_images"].append(cv2.resize(img_right_eye, (56, 56)))
+
+            # Draw face detection results.
             draw_face_result(img, face_bbox, face_lms)
             draw_face_landmarks(cropped_face_copy, np.concatenate(face_lms) - face_top_left_coord)
 
@@ -294,23 +310,30 @@ def process_single_subject(result_dict, subject_id, experiment_id, experiment_ty
 
             marked_video_writer.write(img)
 
+        assert len(new_frame_valid_list) == frame_idx
+        new_frame_valid_list.append(valid_frame)
+
         # Visualise
         if preview:
             cv2.imshow("Preview", img)
             if valid_frame:
                 cv2.imshow("Cropped", cropped_face_copy)
+                cv2.imshow("Left eye", cv2.resize(img_left_eye, (100, 100)))
+                cv2.imshow("Right eye", cv2.resize(img_right_eye, (100, 100)))
             cv2.waitKey(1)
             del img
 
     cap.release()
     marked_video_writer.release()
 
+    return new_frame_valid_list
+
 
 if __name__ == '__main__':
     for d in os.listdir(EYEDIAP_PATH + "Data/"):
         print("Processing", d, "...")
-        results = {"frame_id": [], "subject_id": [], "frames": [], "face_box_tl": [],
-                   "face_landmarks": [], "face_landmarks_crop": [],
+        results = {"frame_id": [], "subject_id": [], "frames": [], "left_eye_images": [], "right_eye_images": [],
+                   "face_box_tl": [], "face_landmarks": [], "face_landmarks_crop": [],
                    "target_3d": [], "left_eyeball_3d": [], "right_eyeball_3d": [],
                    "target_2d": [], "left_eyeball_2d": [], "right_eyeball_2d": [],
                    "target_3d_crop": [], "left_eyeball_3d_crop": [], "right_eyeball_3d_crop": [],
@@ -320,8 +343,8 @@ if __name__ == '__main__':
                    "cam_R": [], "cam_T": [], "cam_K": []}
         subject_id, experiment_id, experiment_type, head_movement = d.split("_")
         if experiment_id == "A" and experiment_type == "FT" and head_movement in ["M", "S"]:
-            process_single_subject(results, subject_id, experiment_id, experiment_type, head_movement,
-                                   feed="vga", preview=False)
+            new_frame_valid_list = process_single_subject(
+                results, subject_id, experiment_id, experiment_type, head_movement, feed="vga", preview=False)
             lengths = []
             for key, value in results.items():
                 if key == "subject_id":
@@ -331,3 +354,6 @@ if __name__ == '__main__':
                 lengths.append(results[key].shape[0])
             assert np.unique(lengths).shape[0] == 1
             np.save(DATASETS_PATH + "eyediap/" + d, results)
+            with open(EYEDIAP_PATH + "Data/" + d + "/final_valid_frames.txt", "w") as f:
+                for idx, i in enumerate(new_frame_valid_list):
+                    f.write("%04d" % idx + "\t" + str(i) + "\n")

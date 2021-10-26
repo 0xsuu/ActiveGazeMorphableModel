@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from pytorch3d.transforms import axis_angle_to_matrix
 
-from autoencoder.encoder import Encoder
+from autoencoder.encoder import Encoder, EncoderEyePatch
 from face_model.flame_model import FlameModel
 from constants import *
 from pt_renderer import PTRenderer
@@ -16,7 +16,10 @@ class Autoencoder(nn.Module):
 
         self.render_image = args.pixel_loss
 
-        self.encoder = Encoder(400 + 145 + 3 + 3 + 1 + 2 + 2, args.network).to(device)
+        if args.eye_patch:
+            self.encoder = EncoderEyePatch(400 + 145 + 3 + 3 + 1 + 2 + 2, args.network).to(device)
+        else:
+            self.encoder = Encoder(400 + 145 + 3 + 3 + 1 + 2 + 2, args.network).to(device)
 
         self.face_model = FlameModel(FLAME_PATH + "FLAME2020/generic_model.pkl",
                                      FLAME_PATH + "albedoModel2020_FLAME_albedoPart.npz",
@@ -205,3 +208,67 @@ class Autoencoder(nn.Module):
         rot = torch.transpose(rot, 1, 2)
 
         return rot
+
+
+class AutoencoderBaseline(nn.Module):
+    def __init__(self, args):
+        super().__init__()
+
+        self.args = args
+
+        if args.eye_patch:
+            self.encoder = EncoderEyePatch(10, args.network).to(device)
+        else:
+            self.encoder = Encoder(10, args.network).to(device)
+
+    def forward(self, x, camera_parameters=None):
+        # Encoder.
+        latent_code = self.encoder(x)
+        l_eyeball_centre = latent_code[:, None, 0:3]
+        r_eyeball_centre = latent_code[:, None, 3:6]
+        left_eye_rotation = latent_code[:, 6:8]
+        right_eye_rotation = latent_code[:, 8:10]
+
+        # Calculate gaze information.
+        left_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
+                                                torch.tensor([[0., 0., 0.]], device=device), left_eye_rotation)
+        right_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
+                                                 torch.tensor([[0., 0., 0.]], device=device), right_eye_rotation)
+
+        lr_cross = torch.cross(left_gaze, right_gaze, dim=2)
+        lin_solve = torch.bmm(torch.inverse(torch.cat([left_gaze, -right_gaze, lr_cross], dim=1).transpose(1, 2)),
+                              (r_eyeball_centre - l_eyeball_centre).transpose(1, 2))
+        gaze_point_l = l_eyeball_centre + lin_solve[:, 0:1, :] * left_gaze
+        gaze_point_r = r_eyeball_centre + lin_solve[:, 1:2, :] * right_gaze
+        gaze_point_mid = (gaze_point_l + gaze_point_r) / 2
+        gaze_point_dist = torch.linalg.norm(gaze_point_l - gaze_point_r, dim=2).squeeze(1)
+
+        ret_dict = {"l_eyeball_centre": l_eyeball_centre,  # Left eyeball centre in world coordinate.
+                    "r_eyeball_centre": r_eyeball_centre,  # Right eyeball centre in world coordinate.
+                    "left_eye_rotation": left_eye_rotation,  # Left and Right gaze rotation.
+                    "right_eye_rotation": right_eye_rotation,
+                    "left_gaze": left_gaze,  # Left and Right gazes.
+                    "right_gaze": right_gaze,
+                    "gaze_point_l": gaze_point_l,  # Predicted left gaze point in world coordinate.
+                    "gaze_point_r": gaze_point_r,  # Predicted right gaze point in world coordinate.
+                    "gaze_point_mid": gaze_point_mid,  # Predicted gaze point in world coordinate.
+                    "gaze_point_dist": gaze_point_dist  # Sum of the distances between the gaze points to gaze vector.
+                    }
+
+        return ret_dict
+
+    @staticmethod
+    def apply_eyeball_rotation(eyeball, eyeball_centre, eyeball_rotation_axis_angle):
+        """
+        Rotate eyeball with azimuth and elevation.
+
+        :param eyeball:
+        :param eyeball_centre: Provided to reduce calculation.
+        :param eyeball_rotation_axis_angle:
+        :return:
+        """
+        return torch.einsum(
+            "bvl,bli->bvi", eyeball - eyeball_centre,
+            axis_angle_to_matrix(torch.cat([eyeball_rotation_axis_angle,
+                                            torch.zeros_like(eyeball_rotation_axis_angle[:, 0:1])], dim=1))) \
+               + eyeball_centre

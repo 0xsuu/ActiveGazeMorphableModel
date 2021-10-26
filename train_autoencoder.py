@@ -5,7 +5,7 @@ import time
 import torch
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-from torchvision.transforms import Resize
+from torchvision.transforms import Resize, Grayscale, transforms, Normalize
 from tqdm import tqdm
 import argparse
 import logging
@@ -13,14 +13,15 @@ import shutil
 
 from autoencoder.loss_functions import pixel_loss, landmark_loss, eye_loss, gaze_target_loss, gaze_divergence_loss, \
     parameters_regulariser, gaze_pose_loss, gaze_degree_error
-from autoencoder.model import Autoencoder
+from autoencoder.model import Autoencoder, AutoencoderBaseline
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
 from constants import *
 
 
 def train():
-    model = Autoencoder(args)
+    # model = Autoencoder(args)
+    model = AutoencoderBaseline(args)
     train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
     test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
@@ -33,31 +34,49 @@ def train():
         scheduler = None
 
     def calculate_losses(data_, results_, partition_):
-        loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
-        loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
-        loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
-                            data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
-        loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
-        loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
-        # loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
-        #                                 results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
-        reg_shape_param = parameters_regulariser(results_["shape_parameters"])
-        reg_albedo_param = parameters_regulariser(results_["albedo_parameters"])
+        batch_size = results_["left_gaze"].shape[0]
 
-        batch_size = results_["img"].shape[0]
-        training_logger.log_batch_loss("pixel_loss", loss_pixel.item(), partition_, batch_size)
-        training_logger.log_batch_loss("landmark_loss", loss_landmark.item(), partition_, batch_size)
-        training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
-        training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
-        training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
-        # training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
-        training_logger.log_batch_loss("shape_param_reg", reg_shape_param.item(), partition_, batch_size)
-        training_logger.log_batch_loss("albedo_para_reg", reg_albedo_param.item(), partition_, batch_size)
+        total_loss_weighted = 0
+        if args.pixel_loss:
+            loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
+            training_logger.log_batch_loss("pixel_loss", loss_pixel.item(), partition_, batch_size)
+            total_loss_weighted += loss_pixel * args.lambda1
 
-        total_loss_weighted = \
-            loss_pixel * args.lambda1 + loss_landmark * args.lambda2 + loss_eye * args.lambda3 + \
-            loss_gaze_target * args.lambda4 + loss_gaze_div * args.lambda5 + \
-            reg_shape_param * args.lambda7 + reg_albedo_param * args.lambda8
+        if args.landmark_loss:
+            loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
+            training_logger.log_batch_loss("landmark_loss", loss_landmark.item(), partition_, batch_size)
+            total_loss_weighted += loss_landmark * args.lambda2
+
+        if args.eye_loss:
+            loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
+                                data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
+            training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
+            total_loss_weighted += loss_eye * args.lambda3
+
+        if args.gaze_tgt_loss:
+            loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
+            total_loss_weighted += loss_gaze_target * args.lambda4
+
+        if args.gaze_div_loss:
+            loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
+            training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
+            total_loss_weighted += loss_gaze_div * args.lambda5
+
+        if args.gaze_pose_loss:
+            loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
+                                            results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
+            training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
+            total_loss_weighted += loss_gaze_pose * args.lambda6
+
+        if args.parameters_regulariser:
+            reg_shape_param = parameters_regulariser(results_["shape_parameters"])
+            reg_albedo_param = parameters_regulariser(results_["albedo_parameters"])
+            training_logger.log_batch_loss("shape_param_reg", reg_shape_param.item(), partition_, batch_size)
+            training_logger.log_batch_loss("albedo_para_reg", reg_albedo_param.item(), partition_, batch_size)
+            total_loss_weighted += reg_shape_param * args.lambda7
+            total_loss_weighted += reg_albedo_param * args.lambda8
+
         training_logger.log_batch_loss("total_loss_weighted", total_loss_weighted.item(), partition_, batch_size)
         # early_stopping_criteria = loss_eye.item() * args.lambda3 + loss_gaze_target.item() * args.lambda4 + \
         #     loss_gaze_div.item() * args.lambda5
@@ -75,6 +94,9 @@ def train():
 
     logging.info("Start training...")
     full_start_time = time.time()
+    frame_transform = Resize(224)
+    l_eye_patch_transformation = Grayscale()
+    r_eye_patch_transformation = Grayscale()
     for epoch in range(1, args.epochs + 1):
         logging.info("*** Epoch " + str(epoch) + " ***")
         epoch_start_time = time.time()
@@ -87,13 +109,20 @@ def train():
             gt_img = data["frames"].to(torch.float32) / 255.
             camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
 
-            # Preprocess.
-            resize_transformation = Resize(224)
-            gt_img_input = resize_transformation(gt_img.permute(0, 3, 1, 2))
+            # Preprocess images.
+            left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+            right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+            left_eye_img = l_eye_patch_transformation(left_eye_img)
+            right_eye_img = r_eye_patch_transformation(right_eye_img)
+
+            gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
             # Forward.
             optimiser.zero_grad()
-            results = model(gt_img_input, camera_parameters)
+            if args.eye_patch:
+                results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters)
+            else:
+                results = model(gt_img_input, camera_parameters)
 
             # Calculate losses.
             loss = calculate_losses(data, results, "train")
@@ -113,31 +142,38 @@ def train():
             gt_img = data["frames"].to(torch.float32) / 255.
             camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
 
-            # Preprocess.
-            resize_transformation = Resize(224)
-            gt_img_input = resize_transformation(gt_img.permute(0, 3, 1, 2))
+            # Preprocess images.
+            left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+            right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+            left_eye_img = l_eye_patch_transformation(left_eye_img)
+            right_eye_img = r_eye_patch_transformation(right_eye_img)
+
+            gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
             # Forward.
             with torch.no_grad():
-                results = model(gt_img_input, camera_parameters)
+                if args.eye_patch:
+                    results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters)
+                else:
+                    results = model(gt_img_input, camera_parameters)
 
                 # Calculate losses.
                 calculate_losses(data, results, "eval")
 
-        j = 0
-        gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
-        result_img_np = results["img"][j].detach().cpu().numpy()
+        if os.name == 'nt' and "img" in results:
+            j = 0
+            gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
+            result_img_np = results["img"][j].detach().cpu().numpy()
 
-        result_img_np_none = np.all(result_img_np == [0., 1., 0.], axis=2)
-        result_img_np[result_img_np_none] = gt_img_np[result_img_np_none]
+            result_img_np_none = np.all(result_img_np == [0., 1., 0.], axis=2)
+            result_img_np[result_img_np_none] = gt_img_np[result_img_np_none]
 
-        # tl = data["face_box_tl"][j]
-        # for lm in data["face_landmarks"][j]:
-        #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 255, 0))
-        # for lm in results["face_landmarks"][j]:
-        #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 0, 255))
+            # tl = data["face_box_tl"][j]
+            # for lm in data["face_landmarks"][j]:
+            #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 255, 0))
+            # for lm in results["face_landmarks"][j]:
+            #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 0, 255))
 
-        if os.name == 'nt':
             cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
             cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
             cv2.waitKey(1)
@@ -181,7 +217,9 @@ if __name__ == '__main__':
                         help="Random seed (default: 1).")
     parser.add_argument("-o", "--override", type=bool, default=False,
                         help="Override log directory.")
-    parser.add_argument("--network", type=str, default=0., metavar="ResNet18",
+    parser.add_argument("--network", type=str, default="ResNet18",
+                        help="Backbone network.")
+    parser.add_argument("--eye_patch", type=bool, default=False,
                         help="Backbone network.")
 
     """ Hyper-parameters.
@@ -230,6 +268,8 @@ if __name__ == '__main__':
                         help="")
     parser.add_argument("--gaze_pose_loss", type=bool, default=False,
                         help="")
+    parser.add_argument("--parameters_regulariser", type=bool, default=True,
+                        help="")
 
     """ Misc
     """
@@ -239,13 +279,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v4_resnet"
+    # args.name = "v4_swin_baseline"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
-    args.network = "ResNet18"
+    args.network = "Swin"
+    args.eye_patch = False
+
+    # Baseline.
+    args.pixel_loss = False
+    args.landmark_loss = False
+    args.gaze_pose_loss = False
+    args.parameters_regulariser = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -291,8 +338,11 @@ if __name__ == '__main__':
     train()
 
     """
+    baseline: only eye rotation L2 loss.
+    baseline_2: only eye position and rotation.
     v1: initial version.
     v2: added eyeball rotation correction regarding head pose.
     v3: fix bugs from v2.
     v4: v3 + nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal and new dataset without outliers.
+    v5: +eye patch for training.
     """

@@ -8,7 +8,7 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 import numpy as np
-from torchvision.transforms import Resize
+from torchvision.transforms import Resize, Grayscale
 from tqdm import tqdm
 from psbody.mesh import Mesh
 
@@ -17,7 +17,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v3_nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal_swin"
+NAME = "v4_swin_dp0.5"
 
 
 def evaluate(qualitative=False):
@@ -45,6 +45,10 @@ def evaluate(qualitative=False):
     test_data = EYEDIAP(partition="test", eval_subject=16, head_movement=["M", "S"])
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
 
+    frame_transform = Resize(224)
+    l_eye_patch_transformation = Grayscale()
+    r_eye_patch_transformation = Grayscale()
+
     # Initiate video writer. The qualitative result will be saved in a video.
     rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_full.mov",
                                             cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
@@ -66,8 +70,7 @@ def evaluate(qualitative=False):
         camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
 
         # Preprocess.
-        resize_transformation = Resize(224)
-        gt_img_input = resize_transformation(gt_img.permute(0, 3, 1, 2))
+        gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
         # Forward.
         with torch.no_grad():

@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
+from torchvision.transforms import Grayscale
 
 from constants import *
 
@@ -43,6 +44,10 @@ class EYEDIAP(Dataset):
                 self.dataset[key] = torch.from_numpy(value).to(d_type)
             else:
                 self.dataset[key] = torch.from_numpy(value).to(device, d_type)
+
+    def get_eye_image_mean_std(self, side):
+        eye_img = Grayscale()(self.dataset[side + "_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.)
+        return {"mean": torch.mean(eye_img, (0, 2, 3)), "std": torch.std(eye_img, (0, 2, 3))}
 
     def __getitem__(self, index):
         ret_dict = {}
