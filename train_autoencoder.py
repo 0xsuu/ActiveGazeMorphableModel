@@ -20,8 +20,10 @@ from constants import *
 
 
 def train():
-    # model = Autoencoder(args)
-    model = AutoencoderBaseline(args)
+    if "baseline" in args.name:
+        model = AutoencoderBaseline(args)
+    else:
+        model = Autoencoder(args)
     train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
     test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
@@ -279,7 +281,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v4_swin_baseline_2"
+    args.name = "v4_swin_baseline"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
@@ -287,12 +289,6 @@ if __name__ == '__main__':
 
     args.network = "Swin"
     args.eye_patch = False
-
-    # Baseline.
-    args.pixel_loss = False
-    args.landmark_loss = False
-    args.gaze_pose_loss = False
-    args.parameters_regulariser = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -305,6 +301,22 @@ if __name__ == '__main__':
     args.batch_size = 32
 
     args.override = True
+
+    # Baseline.
+    args.pixel_loss = False
+    args.landmark_loss = False
+    args.eye_loss = False
+    args.gaze_tgt_loss = False
+    args.gaze_div_loss = False
+    args.gaze_pose_loss = True
+    args.parameters_regulariser = False
+
+    # # Baseline_2.
+    # args.pixel_loss = False
+    # args.landmark_loss = False
+    # args.gaze_pose_loss = False
+    # args.parameters_regulariser = False
+
     # """ End of argument override. """
 
     # Set PyTorch manual random seed.

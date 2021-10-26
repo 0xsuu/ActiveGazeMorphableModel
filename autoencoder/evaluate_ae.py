@@ -12,12 +12,12 @@ from torchvision.transforms import Resize, Grayscale
 from tqdm import tqdm
 from psbody.mesh import Mesh
 
-from autoencoder.model import Autoencoder
+from autoencoder.model import Autoencoder, AutoencoderBaseline
 from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.eyediap_preprocess import world_to_img, img_to_world
 
-NAME = "v4_swin_dp0.5"
+NAME = "v4_swin_baseline"
 
 
 def evaluate(qualitative=False):
@@ -25,7 +25,7 @@ def evaluate(qualitative=False):
     with open(LOGS_PATH + NAME + "/config.json", "r") as f:
         args = SimpleNamespace(**json.load(f))
 
-    model = Autoencoder(args)
+    model = AutoencoderBaseline(args)
     saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
 
     # # Version change fixing. Modify the saved state dict for backward compatibility.
@@ -55,6 +55,8 @@ def evaluate(qualitative=False):
 
     l_gaze_angle_errors_rot = []  # Gaze angle error calculated by rotation ground truth.
     r_gaze_angle_errors_rot = []
+    l_gaze_angle_errors_rot_gt = []  # Gaze angle error calculated by rotation ground truth, gaze vector only,
+    r_gaze_angle_errors_rot_gt = []  # in cropped space.
     l_gaze_rot_axis_pred = []
     r_gaze_rot_axis_pred = []
     l_gaze_rot_axis_gt = []
@@ -137,18 +139,21 @@ def evaluate(qualitative=False):
             draw_gaze(raw_gaze, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
                       l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
 
-            rendered = (results["img"][0].cpu().numpy() * 255).astype(np.uint8)
-            rendered_none_idx = np.all(rendered == [0, 255, 0], axis=2)
-            rendered[rendered_none_idx] = cv2.resize(raw, (224, 224))[rendered_none_idx]
+            if "img" in results:
+                rendered = (results["img"][0].cpu().numpy() * 255).astype(np.uint8)
+                rendered_none_idx = np.all(rendered == [0, 255, 0], axis=2)
+                rendered[rendered_none_idx] = cv2.resize(raw, (224, 224))[rendered_none_idx]
 
-            # draw_gaze(rendered, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
-            #           l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
+                # draw_gaze(rendered, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_centre_screen_gt,
+                #           l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
+
+                rendered = cv2.resize(rendered, (512, 512))
+            else:
+                rendered = np.zeros((512, 512, 3))
 
             raw = cv2.resize(raw, (512, 512))
-            rendered = cv2.resize(rendered, (512, 512))
             raw_gaze = cv2.resize(raw_gaze, (512, 512))
             combined = np.concatenate([raw, rendered, raw_gaze], axis=1)
-
             rendered_video_writer.write(combined)
 
             # cv2.imshow("1", combined)
@@ -161,6 +166,12 @@ def evaluate(qualitative=False):
         r_gaze_angle_errors_rot.append(
             get_angle(r_gaze_rot - r_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
+        l_gaze_angle_errors_rot_gt.append(
+            get_angle(results["left_gaze"][0].cpu().numpy(),
+                      data["target_3d_crop"].cpu().numpy() - data["left_eyeball_3d_crop"].cpu().numpy()))
+        r_gaze_angle_errors_rot_gt.append(
+            get_angle(results["right_gaze"][0].cpu().numpy(),
+                      data["target_3d_crop"].cpu().numpy() - data["right_eyeball_3d_crop"].cpu().numpy()))
 
         l_gaze_angle_errors_tgt.append(
             get_angle(target_orig - l_eyeball_centre_orig,
@@ -184,6 +195,7 @@ def evaluate(qualitative=False):
     rendered_video_writer.release()
 
     report_two_eye_gaze_angle_error("rot", l_gaze_angle_errors_rot, r_gaze_angle_errors_rot)
+    report_two_eye_gaze_angle_error("rot_crop_gt", l_gaze_angle_errors_rot_gt, r_gaze_angle_errors_rot_gt)
     report_two_eye_gaze_angle_error("tgt", l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt)
     report_two_eye_gaze_angle_error("tgt_gt", l_gaze_angle_errors_tgt_gt, r_gaze_angle_errors_tgt_gt)
 
