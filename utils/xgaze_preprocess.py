@@ -21,7 +21,7 @@ if __name__ == '__main__':
         cv2.drawMarker(frame, (int(i[0]), int(i[1])), (0, 255, 0),
                        markerSize=20, markerType=cv2.MARKER_TILTED_CROSS, thickness=4)
 
-    cv2.line(frame, (int(gaze_point_screen[0]), 4000 - int(gaze_point_screen[1])), (0, 0, 255),
+    cv2.drawMarker(frame, (int(gaze_point_screen[0]), 4000 - int(gaze_point_screen[1])), (0, 0, 255),
                    markerSize=20, markerType=cv2.MARKER_STAR, thickness=4)
 
     frame = cv2.resize(frame, (1200, 800))

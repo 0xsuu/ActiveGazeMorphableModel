@@ -279,7 +279,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v4_swin_baseline"
+    args.name = "v4_swin_baseline_2"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
