@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 from constants import *
 from utils.face_landmark_detector import FaceLandmarkDetector
+from utils.camera_model import world_to_img, img_to_world
 
 
 def to_numpy(arr):
@@ -40,18 +41,6 @@ def read_labels(filename):
         if len(i) != proper_len:
             label_list[idx] = [0.] * proper_len
     return np.array(label_list)
-
-
-def world_to_img(coordinates_3d, intrinsics, R, T):
-    projected_coord = (((coordinates_3d - T.T) @ R.T) @ intrinsics.T)
-    projected_coord[:, :2] = projected_coord[:, :2] / projected_coord[:, 2].reshape(-1, 1)
-    return projected_coord
-
-
-def img_to_world(coordinates_2dz, intrinsics, R, T):
-    coordinates_2dz[:, :2] = coordinates_2dz[:, :2] * coordinates_2dz[:, 2].reshape(-1, 1)
-    coordinates_2dz = coordinates_2dz @ np.linalg.inv(intrinsics.T) @ np.linalg.inv(R.T) + T.T
-    return coordinates_2dz
 
 
 def draw_line(frame, point_1, point_2, colour=(0, 255, 255), thickness=2):

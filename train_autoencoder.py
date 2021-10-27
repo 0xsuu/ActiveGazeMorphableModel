@@ -24,6 +24,7 @@ def train():
         model = AutoencoderBaseline(args)
     else:
         model = Autoencoder(args)
+    logging_source_code(model)
     train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
     test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
@@ -41,6 +42,13 @@ def train():
         total_loss_weighted = 0
         if args.pixel_loss:
             loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
+            if args.eye_patch:
+                loss_pixel += pixel_loss(
+                    l_eye_patch_transformation(results_["left_eye_patch"].permute(0, 3, 1, 2)).permute(0, 2, 3, 1),
+                    left_eye_img.permute(0, 2, 3, 1))
+                loss_pixel += pixel_loss(
+                    r_eye_patch_transformation(results_["right_eye_patch"].permute(0, 3, 1, 2)).permute(0, 2, 3, 1),
+                    right_eye_img.permute(0, 2, 3, 1))
             training_logger.log_batch_loss("pixel_loss", loss_pixel.item(), partition_, batch_size)
             total_loss_weighted += loss_pixel * args.lambda1
 
@@ -66,10 +74,20 @@ def train():
             total_loss_weighted += loss_gaze_div * args.lambda5
 
         if args.gaze_pose_loss:
-            loss_gaze_pose = gaze_pose_loss(results_["right_eye_rotation"], data_["left_eyeball_rotation_crop"],
+            loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], data_["left_eyeball_rotation_crop"],
                                             results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
             total_loss_weighted += loss_gaze_pose * args.lambda6
+        else:
+            # TODO: look forward regulariser. Range from [-90, 90] for all azimuth and elevation. Not working.
+            l_rot = results_["left_eye_rotation"]
+            r_rot = results_["right_eye_rotation"]
+            look_forward_reg = ((l_rot[l_rot > 1.5708] - 1.5708) ** 2).sum() + \
+                               ((l_rot[l_rot < -1.5708] + 1.5708) ** 2).sum() + \
+                               ((r_rot[r_rot > 1.5708] - 1.5708) ** 2).sum() + \
+                               ((r_rot[r_rot < 1.5708] + 1.5708) ** 2).sum()
+            training_logger.log_batch_loss("look_forward_reg", look_forward_reg.item(), partition_, batch_size)
+            total_loss_weighted += look_forward_reg
 
         if args.parameters_regulariser:
             reg_shape_param = parameters_regulariser(results_["shape_parameters"])
@@ -219,6 +237,9 @@ if __name__ == '__main__':
                         help="Random seed (default: 1).")
     parser.add_argument("-o", "--override", type=bool, default=False,
                         help="Override log directory.")
+
+    parser.add_argument("--dataset", type=str, default="eyediap",
+                        help="Dataset to train.")
     parser.add_argument("--network", type=str, default="ResNet18",
                         help="Backbone network.")
     parser.add_argument("--eye_patch", type=bool, default=False,
@@ -268,7 +289,7 @@ if __name__ == '__main__':
                         help="")
     parser.add_argument("--gaze_div_loss", type=bool, default=True,
                         help="")
-    parser.add_argument("--gaze_pose_loss", type=bool, default=False,
+    parser.add_argument("--gaze_pose_loss", type=bool, default=True,
                         help="")
     parser.add_argument("--parameters_regulariser", type=bool, default=True,
                         help="")
@@ -281,7 +302,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v4_swin_abl_eye"
+    args.name = "v5_swin"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
@@ -289,7 +310,10 @@ if __name__ == '__main__':
 
     args.network = "Swin"
     args.eye_patch = False
-    args.eye_loss = False
+    # args.eye_loss = False
+    # args.gaze_tgt_loss = False
+    # args.gaze_div_loss = False
+    # args.gaze_pose_loss = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -298,6 +322,7 @@ if __name__ == '__main__':
     args.lambda4 *= 10.
 
     args.lambda7 *= 10.
+    # args.lambda8 /= 2
 
     args.batch_size = 32
 
@@ -357,5 +382,5 @@ if __name__ == '__main__':
     v2: added eyeball rotation correction regarding head pose.
     v3: fix bugs from v2.
     v4: v3 + nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal and new dataset without outliers.
-    v5: +eye patch for training.
+    v5: +eye patch option for training. FIXED EYE POSE LOSS.
     """

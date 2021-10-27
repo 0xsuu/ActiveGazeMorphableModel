@@ -15,9 +15,9 @@ from psbody.mesh import Mesh
 from autoencoder.model import Autoencoder, AutoencoderBaseline
 from constants import *
 from utils.eyediap_dataset import EYEDIAP
-from utils.eyediap_preprocess import world_to_img, img_to_world
+from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v4_swin_baseline"
+NAME = "v5_swin_baseline"
 
 
 def evaluate(qualitative=False):
@@ -25,7 +25,10 @@ def evaluate(qualitative=False):
     with open(LOGS_PATH + NAME + "/config.json", "r") as f:
         args = SimpleNamespace(**json.load(f))
 
-    model = AutoencoderBaseline(args)
+    if "baseline" in NAME:
+        model = AutoencoderBaseline(args)
+    else:
+        model = Autoencoder(args)
     saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
 
     # # Version change fixing. Modify the saved state dict for backward compatibility.

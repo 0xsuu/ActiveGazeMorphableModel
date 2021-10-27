@@ -1,7 +1,9 @@
-
+import cv2
 import torch
 import torch.nn as nn
 from pytorch3d.transforms import axis_angle_to_matrix
+from torchvision.transforms import Resize
+from torchvision.transforms.functional import crop
 
 from autoencoder.encoder import Encoder, EncoderEyePatch
 from face_model.flame_model import FlameModel
@@ -14,6 +16,7 @@ class Autoencoder(nn.Module):
     def __init__(self, args):
         super().__init__()
 
+        self.args = args
         self.render_image = args.pixel_loss
 
         if args.eye_patch:
@@ -114,14 +117,60 @@ class Autoencoder(nn.Module):
         gaze_point_dist = torch.linalg.norm(gaze_point_l - gaze_point_r, dim=2).squeeze(1)
 
         # Mask the regions for rendering.
+        vert_full = vert.detach().clone()
         vert = vert[:, self.face_model.mask]
 
         # Differentiable render.
+        # Note: the ver_img is in the (FACE_CROP_SIZE, FACE_CROP_SIZE) image space.
         img, vert_img = self.renderer(vert, tex, camera_parameters)
         # img = torch.stack([im[fc[1]:fc[1] + FACE_CROP_SIZE, fc[0] - 80:fc[0] + FACE_CROP_SIZE - 80, :]
         #                    for im, fc in zip(img, face_box_tl)])
 
         face_landmarks = vert_img[:, self.face_model.masked_landmarks, :2]
+
+        # Get eye patch img.
+        if self.args.eye_patch:
+            left_eye_contour = vert_img.detach().clone()[:, self.face_model.masked_landmarks[-12:-6]] \
+                / FACE_CROP_SIZE * self.renderer.image_size[0]
+            right_eye_contour = vert_img.detach().clone()[:, self.face_model.masked_landmarks[-6:]] \
+                / FACE_CROP_SIZE * self.renderer.image_size[0]
+            left_contour_centre = left_eye_contour.mean(1)
+            right_contour_centre = right_eye_contour.mean(1)
+            l_half_width = torch.max(
+                torch.abs(
+                    left_eye_contour - left_contour_centre[:, None, :]).reshape(left_eye_contour.shape[0], -1),
+                dim=1)[0].to(torch.long)
+            r_half_width = torch.max(
+                torch.abs(
+                    right_eye_contour - right_contour_centre[:, None, :]).reshape(right_eye_contour.shape[0], -1),
+                dim=1)[0].to(torch.long)
+            left_contour_centre = torch.clip(left_contour_centre, l_half_width[:, None] + 1,
+                                             (self.renderer.image_size[1] - l_half_width - 1)[:, None]).to(torch.long)
+            right_contour_centre = torch.clip(right_contour_centre, r_half_width[:, None] + 1,
+                                              (self.renderer.image_size[1] - r_half_width - 1)[:, None]).to(torch.long)
+
+            left_eye_patch = []
+            right_eye_patch = []
+            for i in range(img.shape[0]):
+                left_img = Resize(56)(img[i,
+                                      int(left_contour_centre[i, 0] - l_half_width[i]):
+                                      int(left_contour_centre[i, 0] + l_half_width[i]),
+                                      int(left_contour_centre[i, 1] - l_half_width[i]):
+                                      int(left_contour_centre[i, 1] + l_half_width[i])].permute(2, 0, 1)) \
+                    .permute(1, 2, 0)
+                right_img = Resize(56)(img[i,
+                                           int(right_contour_centre[i, 0] - r_half_width[i]):
+                                           int(right_contour_centre[i, 0] + r_half_width[i]),
+                                           int(right_contour_centre[i, 1] - r_half_width[i]):
+                                           int(right_contour_centre[i, 1] + r_half_width[i])].permute(2, 0, 1)) \
+                    .permute(1, 2, 0)
+                left_eye_patch.append(left_img)
+                right_eye_patch.append(right_img)
+            left_eye_patch = torch.stack(left_eye_patch)
+            right_eye_patch = torch.stack(right_eye_patch)
+        else:
+            left_eye_patch = None
+            right_eye_patch = None
 
         ret_dict = {"img": img,  # Rendered images.
                     "face_landmarks": face_landmarks,  # Face landmarks in image coordinate, before crop.
@@ -137,6 +186,10 @@ class Autoencoder(nn.Module):
                     "gaze_point_dist": gaze_point_dist,  # Sum of the distances between the gaze points to gaze vector.
                     "shape_parameters": shape_parameters,  # FLAME shape parameters.
                     "albedo_parameters": albedo_parameters,  # FLAME albedo parameters.
+                    "vert_full": vert_full,  # Full FLAME head.
+                    "vert_masked": vert,  # Masked FLAME head.
+                    "left_eye_patch": left_eye_patch,
+                    "right_eye_patch": right_eye_patch,
                     }
         
         return ret_dict

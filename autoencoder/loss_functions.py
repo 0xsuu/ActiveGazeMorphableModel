@@ -9,7 +9,7 @@ def pixel_loss(image_pred, image_gt):
     if torch.any(mask):
         return F.mse_loss(image_pred[mask], image_gt[mask])
     else:
-        return torch.tensor(0).cuda()
+        return torch.tensor(0., requires_grad=True).cuda()
 
 
 def landmark_loss(landmarks_pred, landmarks_gt):
