@@ -33,8 +33,8 @@ def train():
         train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
         validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
     else:
-        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=-1)
-        validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=-1)
+        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=16)
+        validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=16)
 
     # Initialise model.
     if "baseline" in args.name:
