@@ -29,7 +29,7 @@ def train():
     else:
         train_data = XGazeDataset(partition="train")
         validation_data = XGazeDataset(partition="cv")
-    if os.name == "nt":
+    if os.name == "nt" or args.dataset == "eyediap":
         train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
         validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
     else:
