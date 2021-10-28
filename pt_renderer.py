@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 
 from constants import *
+from utils.xgaze_dataset import cam_to_img
 
 
 class ProjectedMeshRasterizer(nn.Module):
@@ -66,10 +67,11 @@ class NoLightShader(nn.Module):
 
 
 class PTRenderer(nn.Module):
-    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(224, 224)):
+    def __init__(self, faces, faces_uvs, verts_uvs, image_size=(224, 224), face_crop_size=FACE_CROP_SIZE):
         super().__init__()
 
         self.image_size = image_size
+        self.face_crop_size = face_crop_size
 
         blend_params = BlendParams(background_color=(0., 1., 0.))
         raster_settings = RasterizationSettings(image_size=image_size, blur_radius=0.0, faces_per_pixel=1,
@@ -115,7 +117,20 @@ class PTRenderer(nn.Module):
             # screen_y = (image_height - 1.0) / 2.0 * (1.0 - vertices_ndc[..., 1])
             # vertices = torch.stack((screen_x, screen_y, ndc_z), dim=2)
 
-            vertices, cameras = self.project_world_to_img(vertices, camera_parameters)
+            if len(camera_parameters) == 3:
+                vertices, cameras = self.project_world_to_img(vertices, camera_parameters)
+            else:
+                # Assume only intrinsics are passed.
+                cam_K = torch.zeros((camera_parameters.shape[0], 4, 4), dtype=torch.float32, device=device,
+                                    requires_grad=False)
+                cam_K[:, 0, 0] = camera_parameters[:, 0, 0]
+                cam_K[:, 0, 2] = camera_parameters[:, 0, 2]
+                cam_K[:, 1, 1] = camera_parameters[:, 1, 1]
+                cam_K[:, 1, 2] = camera_parameters[:, 1, 2]
+                cam_K[:, 2, 3] = 1
+                cam_K[:, 3, 2] = 1
+                vertices = cam_to_img(vertices, camera_parameters)
+                cameras = PerspectiveCameras(K=cam_K, device=device)
             projected_vertices = vertices[:, :, :2].clone()
 
             # # Inplace version starts.
@@ -130,7 +145,7 @@ class PTRenderer(nn.Module):
 
             # Non-inplace version.
             # vertices_01 = torch.stack([vertices[:, :, 0] - 80, vertices[:, :, 1]], dim=2)
-            vertices_01 = (vertices[:, :, :2] / FACE_CROP_SIZE * 2 - 1) * -1
+            vertices_01 = (vertices[:, :, :2] / self.face_crop_size * 2 - 1) * -1
 
             vertices_2 = vertices[:, :, 2] * -1
             vertices_2 = vertices_2 - (vertices_2.min() - 0.01)

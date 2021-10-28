@@ -13,8 +13,11 @@ from pt_renderer import PTRenderer
 
 
 class FlameModel(nn.Module):
-    def __init__(self, model_path, albedo_path, mask_path, landmark_path, masks=None):
+    def __init__(self, model_path, albedo_path, mask_path, landmark_path, masks=None, initial_R=None, initial_T=None):
         super().__init__()
+
+        self.initial_R = initial_R
+        self.initial_T = initial_T
 
         # Load geometry 3DMM.
         with open(model_path, "rb") as f:
@@ -84,6 +87,10 @@ class FlameModel(nn.Module):
         tex = self.albedo_mean + torch.einsum('bl,mnkl->bmnk', [albedo_params, self.albedo_pc])
 
         tex = torch.clip(tex, 0., 1.)
+
+        if self.initial_R is not None:
+            vert = torch.baddbmm(self.initial_T.unsqueeze(0).repeat(shape_params.shape[0], 1, 1),
+                                 vert, self.initial_R.T.unsqueeze(0).repeat(shape_params.shape[0], 1, 1))
         return vert, tex
 
     def mask_faces(self, mask):

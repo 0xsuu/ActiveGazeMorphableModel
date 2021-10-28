@@ -6,6 +6,7 @@ import torch
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize, Grayscale, transforms, Normalize
+import torch.nn.functional as F
 from tqdm import tqdm
 import argparse
 import logging
@@ -17,25 +18,41 @@ from autoencoder.model import Autoencoder, AutoencoderBaseline
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
 from constants import *
+from utils.xgaze_dataset import XGazeDataset
 
 
 def train():
+    # Load datasets.
+    if args.dataset == "eyediap":
+        train_data = EYEDIAP(partition="train", eval_subjects=[15, 16], head_movement=["S", "M"])
+        validation_data = EYEDIAP(partition="test", eval_subjects=[15], head_movement=["S", "M"])
+    else:
+        train_data = XGazeDataset(partition="train")
+        validation_data = XGazeDataset(partition="cv")
+    if os.name == "nt":
+        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
+        validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
+    else:
+        train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=-1)
+        validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=-1)
+
+    # Initialise model.
     if "baseline" in args.name:
         model = AutoencoderBaseline(args)
     else:
-        model = Autoencoder(args)
-    logging_source_code(model)
-    train_data = EYEDIAP(partition="train", head_movement=["S", "M"])
-    test_data = EYEDIAP(partition="test", head_movement=["S", "M"])
-    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    test_loader = DataLoader(test_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
+        model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
 
+    # Log source code for records.
+    logging_source_code(model)
+
+    # Initialise optimiser.
     optimiser = torch.optim.Adam(model.encoder.parameters(), lr=1e-4, weight_decay=1e-4)
     if args.lr_scheduler == "step":
         scheduler = StepLR(optimiser, 25, 0.9)
     else:
         scheduler = None
 
+    # Loss function calculation wrap-up.
     def calculate_losses(data_, results_, partition_):
         batch_size = results_["left_gaze"].shape[0]
 
@@ -58,8 +75,12 @@ def train():
             total_loss_weighted += loss_landmark * args.lambda2
 
         if args.eye_loss:
-            loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
-                                data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
+            if args.dataset == "eyediap":
+                loss_eye = eye_loss(results_["l_eyeball_centre"].squeeze(1), results_["r_eyeball_centre"].squeeze(1),
+                                    data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
+            else:
+                # Using face point loss instead of eye positions for x-gaze dataset.
+                loss_eye = F.mse_loss(results_["face_centre"], data_["gaze_origins"])
             training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
             total_loss_weighted += loss_eye * args.lambda3
 
@@ -74,8 +95,20 @@ def train():
             total_loss_weighted += loss_gaze_div * args.lambda5
 
         if args.gaze_pose_loss:
-            loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], data_["left_eyeball_rotation_crop"],
-                                            results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
+            if args.dataset == "eyediap":
+                loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], data_["left_eyeball_rotation_crop"],
+                                                results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
+            else:
+                loss_gaze_pose = F.mse_loss(results_["face_gaze_az_el"], data_["face_gazes"])
+                # Additional gaze vector loss.
+                face_gaze_pred = results_["gaze_point_mid"].squeeze(1) - results_["face_centre"]
+                face_gaze_pred_n = face_gaze_pred / torch.linalg.norm(face_gaze_pred, dim=1, keepdim=True)
+                face_gaze_gt = data_["target_3d_crop"] - data_["gaze_origins"]
+                face_gaze_gt_n = face_gaze_gt / torch.linalg.norm(face_gaze_gt, dim=1, keepdim=True)
+                loss_gaze_vector = F.mse_loss(face_gaze_pred_n, face_gaze_gt_n)
+                training_logger.log_batch_loss("gaze_vector_loss", loss_gaze_vector.item(), partition_, batch_size)
+                total_loss_weighted += loss_gaze_vector * args.lambda6
+
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
             total_loss_weighted += loss_gaze_pose * args.lambda6
         else:
@@ -98,20 +131,24 @@ def train():
             total_loss_weighted += reg_albedo_param * args.lambda8
 
         training_logger.log_batch_loss("total_loss_weighted", total_loss_weighted.item(), partition_, batch_size)
-        # early_stopping_criteria = loss_eye.item() * args.lambda3 + loss_gaze_target.item() * args.lambda4 + \
-        #     loss_gaze_div.item() * args.lambda5
-        early_stopping_criteria = gaze_degree_error(results_["l_eyeball_centre"].squeeze(1),
-                                                    results_["r_eyeball_centre"].squeeze(1),
-                                                    data_["left_eyeball_3d_crop"],
-                                                    data_["right_eyeball_3d_crop"],
-                                                    results_["gaze_point_mid"].squeeze(1),
-                                                    data_["target_3d_crop"])
+        if args.dataset == "eyediap":
+            early_stopping_criteria = gaze_degree_error(results_["l_eyeball_centre"].squeeze(1),
+                                                        results_["r_eyeball_centre"].squeeze(1),
+                                                        data_["left_eyeball_3d_crop"],
+                                                        data_["right_eyeball_3d_crop"],
+                                                        results_["gaze_point_mid"].squeeze(1),
+                                                        data_["target_3d_crop"])
+        else:
+            early_stopping_criteria = \
+                np.rad2deg(np.nan_to_num(np.arccos(
+                    np.sum(
+                        face_gaze_pred.detach().cpu().numpy() * face_gaze_gt.detach().cpu().numpy(), axis=1)))).mean()
 
         training_logger.log_batch_loss("loss", early_stopping_criteria,
                                        partition_, batch_size)
 
         return total_loss_weighted
-
+    # torch.autograd.set_detect_anomaly(True)
     logging.info("Start training...")
     full_start_time = time.time()
     frame_transform = Resize(224)
@@ -127,13 +164,17 @@ def train():
         for data in tqdm(train_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
-            camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+            if args.dataset == "eyediap":
+                camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+            else:
+                camera_parameters = data["cam_intrinsics"]
 
             # Preprocess images.
-            left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
-            right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
-            left_eye_img = l_eye_patch_transformation(left_eye_img)
-            right_eye_img = r_eye_patch_transformation(right_eye_img)
+            if args.eye_patch:
+                left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+                right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+                left_eye_img = l_eye_patch_transformation(left_eye_img)
+                right_eye_img = r_eye_patch_transformation(right_eye_img)
 
             gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
@@ -157,16 +198,20 @@ def train():
         """ Evaluate.
         """
         model.eval()
-        for data in tqdm(test_loader):
+        for data in tqdm(validation_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
-            camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+            if args.dataset == "eyediap":
+                camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+            else:
+                camera_parameters = data["cam_intrinsics"]
 
             # Preprocess images.
-            left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
-            right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
-            left_eye_img = l_eye_patch_transformation(left_eye_img)
-            right_eye_img = r_eye_patch_transformation(right_eye_img)
+            if args.eye_patch:
+                left_eye_img = data["left_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+                right_eye_img = data["right_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.
+                left_eye_img = l_eye_patch_transformation(left_eye_img)
+                right_eye_img = r_eye_patch_transformation(right_eye_img)
 
             gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
@@ -180,7 +225,7 @@ def train():
                 # Calculate losses.
                 calculate_losses(data, results, "eval")
 
-        if os.name == 'nt' and "img" in results:
+        if os.name == "nt" and "img" in results:
             j = 0
             gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
             result_img_np = results["img"][j].detach().cpu().numpy()
@@ -302,11 +347,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v5_swin"
+    args.name = "v5_swin_cv"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
+
+    # args.dataset = "xgaze"
 
     args.network = "Swin"
     args.eye_patch = False

@@ -9,16 +9,16 @@ from constants import *
 
 
 class EYEDIAP(Dataset):
-    def __init__(self, partition="train", eval_subject=16, exp_id="A", exp_type="FT", head_movement="S",
+    def __init__(self, partition="train", eval_subjects=(16,), exp_id="A", exp_type="FT", head_movement="S",
                  load_device="cuda"):
         self.load_device = load_device
         self.dataset = None
 
         for i in range(1, 17):
             for hdm in head_movement:
-                if partition == "train" and i == eval_subject:
+                if partition == "train" and i in eval_subjects:
                     continue
-                if partition == "test" and i != eval_subject:
+                if partition == "test" and i not in eval_subjects:
                     continue
                 if not os.path.exists(DATASETS_PATH + "eyediap/" + str(i) +
                                       "_" + exp_id + "_" + exp_type + "_" + hdm + ".npy"):
@@ -61,6 +61,10 @@ class EYEDIAP(Dataset):
 
     def __len__(self):
         return self.dataset["frames"].shape[0]
+
+    @property
+    def face_crop_size(self):
+        return self[0]["frames"].shape[0]
 
 
 if __name__ == '__main__':

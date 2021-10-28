@@ -25,6 +25,10 @@ def evaluate(qualitative=False):
     with open(LOGS_PATH + NAME + "/config.json", "r") as f:
         args = SimpleNamespace(**json.load(f))
 
+        # Backward compatibility.
+        if not hasattr(args, "dataset"):
+            args.dataset = "eyediap"
+
     if "baseline" in NAME:
         model = AutoencoderBaseline(args)
     else:

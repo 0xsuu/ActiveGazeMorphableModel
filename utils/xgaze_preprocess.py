@@ -130,6 +130,7 @@ def process_subjects(partition="train"):
     gaze_point_camera_list = []
     face_centre_camera_list = []
     face_landmarks_crop_list = []
+    head_rotation_list = []
     warp_matrix_list = []
     for subject_file in tqdm(os.listdir(XGAZE_PATH + "data/annotation_" + partition)):
         subject_id = int(subject_file[7:11])
@@ -146,7 +147,7 @@ def process_subjects(partition="train"):
                 head_pose_T_camera = rest[8:11]
                 face_landmarks = rest[11:].reshape(-1, 2)
 
-                _, _, _, landmarks_warped, _, face_centre, W = \
+                _, _, _, landmarks_warped, R, face_centre, W = \
                     normalise_face(None, face_lm_model, face_landmarks, head_pose_R_camera, head_pose_T_camera,
                                    gaze_point_camera, cam_param[cam_id][0])
 
@@ -156,6 +157,7 @@ def process_subjects(partition="train"):
                 gaze_point_camera_list.append(gaze_point_camera)
                 face_centre_camera_list.append(face_centre)
                 face_landmarks_crop_list.append(landmarks_warped)
+                head_rotation_list.append(R)
                 warp_matrix_list.append(W)
 
     # Save stuff.
@@ -166,6 +168,7 @@ def process_subjects(partition="train"):
              "gaze_point_camera_list": np.stack(gaze_point_camera_list),
              "face_centre_camera_list": np.stack(face_centre_camera_list),
              "face_landmarks_crop_list": np.stack(face_landmarks_crop_list),
+             "head_rotation_list": np.stack(head_rotation_list),
              "warp_matrix_list": np.stack(warp_matrix_list)})
 
     # # Load annotation old.
