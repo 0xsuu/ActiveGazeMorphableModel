@@ -23,9 +23,10 @@ def log_table(dict_list, col_list=None):
 
 
 class TrainingLogger(object):
-    def __init__(self, log_name_dir, args):
+    def __init__(self, log_name_dir, args, save=True):
         self.log_name_dir = log_name_dir
         self.args = args
+        self.save = save
 
         with open(self.log_name_dir + "config.json", "w") as f:
             json.dump(vars(args), f, indent=4)
@@ -70,19 +71,20 @@ class TrainingLogger(object):
         for key, value in scalars.items():
             self.tfb_writer.add_scalar(key, value, epoch)
 
-        # Log weights.
-        if self.epoch_logs["loss/eval"] <= self.running_metrics["best_eval"]:
-            self.running_metrics["best_eval"] = self.epoch_logs["loss/eval"]
-            torch.save(log_dict["model_weights"], self.log_name_dir + "model_best.pt")
-            # torch.save(log_dict["optimiser_weights"], self.log_name_dir + "optimiser_best.pt")
-            logging.info("Best model weights saved.")
+        if self.save:
+            # Log weights.
+            if self.epoch_logs["loss/eval"] <= self.running_metrics["best_eval"]:
+                self.running_metrics["best_eval"] = self.epoch_logs["loss/eval"]
+                torch.save(log_dict["model_weights"], self.log_name_dir + "model_best.pt")
+                # torch.save(log_dict["optimiser_weights"], self.log_name_dir + "optimiser_best.pt")
+                logging.info("Best model weights saved.")
 
-            self.running_metrics.update(self.epoch_logs)
-            self.tfb_writer.add_hparams(self.hparam_dict, self.running_metrics, run_name="Best eval")
+                self.running_metrics.update(self.epoch_logs)
+                self.tfb_writer.add_hparams(self.hparam_dict, self.running_metrics, run_name="Best eval")
 
-        if epoch % 10 == 0:
-            torch.save(log_dict["model_weights"], self.log_name_dir + "model_" + str(epoch) + ".pt")
-            logging.info("Model weights saved.")
+            if epoch % 10 == 0:
+                torch.save(log_dict["model_weights"], self.log_name_dir + "model_" + str(epoch) + ".pt")
+                logging.info("Model weights saved.")
 
         # Reset for next epoch.
         self.epoch_logs.clear()

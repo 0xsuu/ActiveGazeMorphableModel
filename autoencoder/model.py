@@ -20,18 +20,24 @@ class Autoencoder(nn.Module):
         self.render_image = args.pixel_loss
         self.face_crop_size = face_crop_size
 
+        if args.dataset == "eyediap":
+            self.gaze_direction = 1.
+        else:
+            self.gaze_direction = -1.
+
         base_feature_channels = 400 + 145 + 3 + 3 + 1 + 2 + 2
         if args.dataset == "xgaze":
             # Add face gaze azimuth and elevation.
             base_feature_channels += 2
 
             # Add initial pose.
-            initial_R = torch.tensor([[-0.39467175, -0.59959388, 0.69621936],
-                                      [-0.30316818, -0.63031588, -0.7146964],
-                                      [0.8673657, -0.49314204, 0.06699009]], dtype=torch.float32, device=device)
-            initial_T = torch.tensor([[1.1566796, 7.08228419, 23.88972769]], dtype=torch.float32, device=device)
+            initial_R = torch.tensor([[ 0.99494505, -0.00189795, -0.1004036 ],
+                                      [ 0.02820983, -0.9542791 ,  0.297583  ],
+                                      [-0.09637786, -0.29891106, -0.9494016 ]], dtype=torch.float32, device=device)
+            initial_T = torch.tensor([[-20.613983,   -7.9618144, 876.4872]], dtype=torch.float32, device=device)
+            initial_scale = 994.7109985351562
         else:
-            initial_R, initial_T = None, None
+            initial_R, initial_T, initial_scale = None, None, None
 
         if args.eye_patch:
             self.encoder = EncoderEyePatch(base_feature_channels, args.network).to(device)
@@ -42,13 +48,13 @@ class Autoencoder(nn.Module):
                                      FLAME_PATH + "albedoModel2020_FLAME_albedoPart.npz",
                                      FLAME_PATH + "FLAME_masks/FLAME_masks.pkl", None,
                                      masks=["right_eyeball", "left_eyeball", "nose", "eye_region"],
-                                     initial_R=initial_R, initial_T=initial_T).to(device)
+                                     initial_R=initial_R, initial_T=initial_T, initial_scale=initial_scale).to(device)
         self.renderer = PTRenderer(self.face_model.faces,
                                    self.face_model.albedo_ft.unsqueeze(0),
                                    self.face_model.albedo_vt.unsqueeze(0),
                                    face_crop_size=face_crop_size).to(device)
 
-    def forward(self, x, camera_parameters):
+    def forward(self, x, camera_parameters, warp_matrices=None):
         # Encoder.
         latent_code = self.encoder(x)
         shape_parameters = latent_code[:, :400]
@@ -71,8 +77,13 @@ class Autoencoder(nn.Module):
         # vert = torch.bmm(vert - vert.mean(1, keepdims=True),
         #                  torch.transpose(axis_angle_to_matrix(face_rotation), 1, 2)) \
         #     * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)
-        vert = torch.bmm(vert - vert.mean(1, keepdims=True), rotation_matrix_from_axis_combined(face_rotation)) \
+        # print(face_rotation, face_translation, face_scale)
+        vert_mean = vert.mean(1, keepdims=True)
+        vert = torch.bmm(vert - vert_mean, rotation_matrix_from_axis_combined(face_rotation)) \
             * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)  # Why use this?
+        if warp_matrices is not None:
+            # Stands for x-gaze dataset.
+            vert += vert_mean  # Haven't test on eyediap.
 
         # # TODO: Debug
         # vert = vert - torch.mean(vert[:, self.face_model.left_eyeball_mask], dim=1).unsqueeze(1) + dbg1.unsqueeze(1)
@@ -85,7 +96,7 @@ class Autoencoder(nn.Module):
         r_eyeball = vert[:, self.face_model.right_eyeball_mask]
         l_eyeball_centre = torch.mean(l_eyeball, dim=1, keepdim=True)
         r_eyeball_centre = torch.mean(r_eyeball, dim=1, keepdim=True)
-        face_centre = (vert[:, self.face_model.landmarks[[19, 24, 25, 30]]].mean(1) +
+        face_centre = (vert[:, self.face_model.landmarks[[19, 22, 25, 28]]].mean(1) +
                        vert[:, self.face_model.landmarks[[14, 18]]].mean(1)) / 2
 
         # Get initial gaze direction caused by head movement.
@@ -120,9 +131,9 @@ class Autoencoder(nn.Module):
         vert = vert_no_eyes + vert_eyes
 
         # Calculate gaze information.
-        left_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
+        left_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., self.gaze_direction]]], device=device),
                                                 torch.tensor([[0., 0., 0.]], device=device), left_eye_rotation)
-        right_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
+        right_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., self.gaze_direction]]], device=device),
                                                  torch.tensor([[0., 0., 0.]], device=device), right_eye_rotation)
 
         lr_cross = torch.cross(left_gaze, right_gaze, dim=2)
@@ -136,10 +147,11 @@ class Autoencoder(nn.Module):
         # Mask the regions for rendering.
         vert_full = vert.detach().clone()
         vert = vert[:, self.face_model.mask]
+        face_landmarks_3d = vert[:, self.face_model.masked_landmarks, :]
 
         # Differentiable render.
         # Note: the ver_img is in the (FACE_CROP_SIZE, FACE_CROP_SIZE) image space.
-        img, vert_img = self.renderer(vert, tex, camera_parameters)
+        img, vert_img = self.renderer(vert, tex, camera_parameters, warp_matrices)
         # img = torch.stack([im[fc[1]:fc[1] + FACE_CROP_SIZE, fc[0] - 80:fc[0] + FACE_CROP_SIZE - 80, :]
         #                    for im, fc in zip(img, face_box_tl)])
 
@@ -191,6 +203,7 @@ class Autoencoder(nn.Module):
 
         ret_dict = {"img": img,  # Rendered images.
                     "face_landmarks": face_landmarks,  # Face landmarks in image coordinate, before crop.
+                    "face_landmarks_3d": face_landmarks_3d,  # Face landmarks in world coordinate.
                     "l_eyeball_centre": l_eyeball_centre,  # Left eyeball centre in world coordinate.
                     "r_eyeball_centre": r_eyeball_centre,  # Right eyeball centre in world coordinate.
                     "face_centre": face_centre,  # Face centre world coordinate.
@@ -209,6 +222,8 @@ class Autoencoder(nn.Module):
                     "vert_masked": vert,  # Masked FLAME head.
                     "left_eye_patch": left_eye_patch,
                     "right_eye_patch": right_eye_patch,
+                    "sb": l_eyeball_centre + left_gaze * 1000.,
+                    "sb2": r_eyeball_centre + right_gaze * 1000.,
                     }
         
         return ret_dict
@@ -229,8 +244,7 @@ class Autoencoder(nn.Module):
                                             torch.zeros_like(eyeball_rotation_axis_angle[:, 0:1])], dim=1))) \
             + eyeball_centre
 
-    @staticmethod
-    def find_gaze_axis_rotation_matrix(init_gaze):
+    def find_gaze_axis_rotation_matrix(self, init_gaze):
         """
         Find the azimuth and elevation axis angles from init_gaze to [0, 0, 1]
 
@@ -267,7 +281,7 @@ class Autoencoder(nn.Module):
 
         batch_size = init_gaze.shape[0]
         a = init_gaze[:, 0, :]
-        b = torch.tensor([[0., 0., 1.]]).to(device).repeat(batch_size, 1)
+        b = torch.tensor([[0., 0., self.gaze_direction]]).to(device).repeat(batch_size, 1)
 
         a = a / torch.norm(a, dim=1).unsqueeze(1)
 

@@ -18,7 +18,7 @@ from autoencoder.model import Autoencoder, AutoencoderBaseline
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
 from constants import *
-from utils.xgaze_dataset import XGazeDataset
+from utils.xgaze_dataset import XGazeDataset, cam_to_img, perspective_transform
 
 
 def train():
@@ -80,12 +80,18 @@ def train():
                                     data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
             else:
                 # Using face point loss instead of eye positions for x-gaze dataset.
-                loss_eye = F.mse_loss(results_["face_centre"], data_["gaze_origins"])
+                loss_eye = F.l1_loss(results_["face_centre"], data_["gaze_origins"])
+                loss_face = F.l1_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
+                training_logger.log_batch_loss("3d_face_loss", loss_face.item(), partition_, batch_size)
+                total_loss_weighted += loss_face * 1
             training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
             total_loss_weighted += loss_eye * args.lambda3
 
         if args.gaze_tgt_loss:
-            loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            if args.dataset == "eyediap":
+                loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            else:
+                loss_gaze_target = F.l1_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
             total_loss_weighted += loss_gaze_target * args.lambda4
 
@@ -94,33 +100,35 @@ def train():
             training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
             total_loss_weighted += loss_gaze_div * args.lambda5
 
+        face_gaze_pred = None
         if args.gaze_pose_loss:
             if args.dataset == "eyediap":
                 loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], data_["left_eyeball_rotation_crop"],
                                                 results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
             else:
-                loss_gaze_pose = F.mse_loss(results_["face_gaze_az_el"], data_["face_gazes"])
+                # loss_gaze_pose = F.mse_loss(results_["face_gaze_az_el"], data_["face_gazes"])
                 # Additional gaze vector loss.
                 face_gaze_pred = results_["gaze_point_mid"].squeeze(1) - results_["face_centre"]
                 face_gaze_pred_n = face_gaze_pred / torch.linalg.norm(face_gaze_pred, dim=1, keepdim=True)
                 face_gaze_gt = data_["target_3d_crop"] - data_["gaze_origins"]
                 face_gaze_gt_n = face_gaze_gt / torch.linalg.norm(face_gaze_gt, dim=1, keepdim=True)
-                loss_gaze_vector = F.mse_loss(face_gaze_pred_n, face_gaze_gt_n)
-                training_logger.log_batch_loss("gaze_vector_loss", loss_gaze_vector.item(), partition_, batch_size)
-                total_loss_weighted += loss_gaze_vector * args.lambda6
+                loss_gaze_pose = F.mse_loss(face_gaze_pred_n, face_gaze_gt_n)
+                # training_logger.log_batch_loss("gaze_vector_loss", loss_gaze_vector.item(), partition_, batch_size)
+                # total_loss_weighted += loss_gaze_vector * args.lambda6
 
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
             total_loss_weighted += loss_gaze_pose * args.lambda6
-        else:
-            # TODO: look forward regulariser. Range from [-90, 90] for all azimuth and elevation. Not working.
-            l_rot = results_["left_eye_rotation"]
-            r_rot = results_["right_eye_rotation"]
-            look_forward_reg = ((l_rot[l_rot > 1.5708] - 1.5708) ** 2).sum() + \
-                               ((l_rot[l_rot < -1.5708] + 1.5708) ** 2).sum() + \
-                               ((r_rot[r_rot > 1.5708] - 1.5708) ** 2).sum() + \
-                               ((r_rot[r_rot < 1.5708] + 1.5708) ** 2).sum()
-            training_logger.log_batch_loss("look_forward_reg", look_forward_reg.item(), partition_, batch_size)
-            total_loss_weighted += look_forward_reg
+        # else:
+        #     # TODO: look forward regulariser. Range from [-45, 45] for all azimuth and elevation. Not working.
+        #     l_rot = results_["left_eye_rotation"]
+        #     r_rot = results_["right_eye_rotation"]
+        #     deg = 1.5708 / 2
+        #     look_forward_reg = ((l_rot[l_rot > deg] - deg) ** 2).sum() + \
+        #                        ((l_rot[l_rot < -deg] + deg) ** 2).sum() + \
+        #                        ((r_rot[r_rot > deg] - deg) ** 2).sum() + \
+        #                        ((r_rot[r_rot < deg] + deg) ** 2).sum()
+        #     training_logger.log_batch_loss("look_forward_reg", look_forward_reg.item(), partition_, batch_size)
+        #     total_loss_weighted += look_forward_reg * 10000.
 
         if args.parameters_regulariser:
             reg_shape_param = parameters_regulariser(results_["shape_parameters"])
@@ -138,11 +146,17 @@ def train():
                                                         data_["right_eyeball_3d_crop"],
                                                         results_["gaze_point_mid"].squeeze(1),
                                                         data_["target_3d_crop"])
-        else:
+        elif face_gaze_pred is not None:
             early_stopping_criteria = \
                 np.rad2deg(np.nan_to_num(np.arccos(
                     np.sum(
-                        face_gaze_pred.detach().cpu().numpy() * face_gaze_gt.detach().cpu().numpy(), axis=1)))).mean()
+                        face_gaze_pred_n.detach().cpu().numpy() *
+                        face_gaze_gt_n.detach().cpu().numpy(), axis=1)))).mean()
+        else:
+            early_stopping_criteria = 0.
+
+        if early_stopping_criteria == 0:
+            early_stopping_criteria = 361.  # Duo yi du re ai.
 
         training_logger.log_batch_loss("loss", early_stopping_criteria,
                                        partition_, batch_size)
@@ -166,8 +180,10 @@ def train():
             gt_img = data["frames"].to(torch.float32) / 255.
             if args.dataset == "eyediap":
                 camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+                warp_matrices = None
             else:
                 camera_parameters = data["cam_intrinsics"]
+                warp_matrices = data["warp_matrices"]
 
             # Preprocess images.
             if args.eye_patch:
@@ -181,9 +197,9 @@ def train():
             # Forward.
             optimiser.zero_grad()
             if args.eye_patch:
-                results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters)
+                results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters, warp_matrices)
             else:
-                results = model(gt_img_input, camera_parameters)
+                results = model(gt_img_input, camera_parameters, warp_matrices)
 
             # Calculate losses.
             loss = calculate_losses(data, results, "train")
@@ -203,8 +219,10 @@ def train():
             gt_img = data["frames"].to(torch.float32) / 255.
             if args.dataset == "eyediap":
                 camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
+                warp_matrices = None
             else:
                 camera_parameters = data["cam_intrinsics"]
+                warp_matrices = data["warp_matrices"]
 
             # Preprocess images.
             if args.eye_patch:
@@ -218,15 +236,15 @@ def train():
             # Forward.
             with torch.no_grad():
                 if args.eye_patch:
-                    results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters)
+                    results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters, warp_matrices)
                 else:
-                    results = model(gt_img_input, camera_parameters)
+                    results = model(gt_img_input, camera_parameters, warp_matrices)
 
                 # Calculate losses.
                 calculate_losses(data, results, "eval")
 
         if os.name == "nt" and "img" in results:
-            j = 0
+            j = 1
             gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
             result_img_np = results["img"][j].detach().cpu().numpy()
 
@@ -238,6 +256,46 @@ def train():
             #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 255, 0))
             # for lm in results["face_landmarks"][j]:
             #     cv2.circle(result_img_np, (int(lm[0] - tl[0]), int(lm[1] - tl[1])), 1, (0, 0, 255))
+
+            lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
+            lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
+
+            lm_f3d_pred = cam_to_img(results["face_landmarks_3d"], data["cam_intrinsics"])
+            lm_f3d_pred = perspective_transform(lm_f3d_pred, data["warp_matrices"])
+
+            for idx, lm in enumerate(data["face_landmarks_crop"][j]):
+                cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 1, 0))
+            for idx, lm in enumerate(results["face_landmarks"][j]):
+                cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 0, 1))
+            # for idx, lm in enumerate(lm_f3d[j]):
+            #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 1, 0))
+            # for idx, lm in enumerate(lm_f3d_pred[j]):
+            #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 1))
+
+            fc = cam_to_img(results["face_centre"], data["cam_intrinsics"])
+            fc = perspective_transform(fc, data["warp_matrices"])[j, 0]
+            gc = cam_to_img(data["target_3d_crop"], data["cam_intrinsics"])
+            gc = perspective_transform(gc, data["warp_matrices"])[j, 0]
+            lc = cam_to_img(results["l_eyeball_centre"], data["cam_intrinsics"])
+            lc = perspective_transform(lc, data["warp_matrices"])[j, 0]
+            rc = cam_to_img(results["r_eyeball_centre"], data["cam_intrinsics"])
+            rc = perspective_transform(rc, data["warp_matrices"])[j, 0]
+            ft = cam_to_img(results["sb"], data["cam_intrinsics"])
+            ft = perspective_transform(ft, data["warp_matrices"])[j, 0]
+            ft2 = cam_to_img(results["sb2"], data["cam_intrinsics"])
+            ft2 = perspective_transform(ft2, data["warp_matrices"])[j, 0]
+            cv2.arrowedLine(gt_img_np,
+                            (int(lc[0]), int(lc[1])),
+                            (int(ft[0]), int(ft[1])),
+                            (0, 0, 1), thickness=1)
+            cv2.arrowedLine(gt_img_np,
+                            (int(rc[0]), int(rc[1])),
+                            (int(ft2[0]), int(ft2[1])),
+                            (0, 1, 1), thickness=1)
+            cv2.arrowedLine(gt_img_np,
+                            (int(fc[0]), int(fc[1])),
+                            (int(gc[0]), int(gc[1])),
+                            (0, 1, 0), thickness=1)
 
             cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
             cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
@@ -347,20 +405,23 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v5_swin_cv"
+    args.name = "v5_swin_xgaze_baseline"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
-    # args.dataset = "xgaze"
+    args.dataset = "xgaze"
 
     args.network = "Swin"
     args.eye_patch = False
-    # args.eye_loss = False
-    # args.gaze_tgt_loss = False
-    # args.gaze_div_loss = False
-    # args.gaze_pose_loss = False
+
+    args.pix_loss = True
+    args.landmark_loss = True
+    args.eye_loss = False
+    args.gaze_tgt_loss = False
+    args.gaze_div_loss = True
+    args.gaze_pose_loss = True
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -372,6 +433,15 @@ if __name__ == '__main__':
     # args.lambda8 /= 2
 
     args.batch_size = 32
+
+    if args.dataset == "xgaze":
+        args.lambda1 *= 10.
+        args.lambda2 *= 1
+        args.lambda3 *= 5e-2
+        args.lambda4 *= 1e-3
+        args.lambda5 *= 2
+        args.lambda6 *= 100.
+        args.lambda7 *= 10.
 
     args.override = True
 
@@ -419,7 +489,7 @@ if __name__ == '__main__':
 
     logging.info(vars(args))
 
-    training_logger = TrainingLogger(log_name_dir, args)
+    training_logger = TrainingLogger(log_name_dir, args, True)
     train()
 
     """

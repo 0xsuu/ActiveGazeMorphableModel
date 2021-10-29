@@ -130,6 +130,7 @@ def process_subjects(partition="train"):
     gaze_point_camera_list = []
     face_centre_camera_list = []
     face_landmarks_crop_list = []
+    face_landmarks_3d_list = []
     head_rotation_list = []
     warp_matrix_list = []
     for subject_file in tqdm(os.listdir(XGAZE_PATH + "data/annotation_" + partition)):
@@ -150,6 +151,8 @@ def process_subjects(partition="train"):
                 _, _, _, landmarks_warped, R, face_centre, W = \
                     normalise_face(None, face_lm_model, face_landmarks, head_pose_R_camera, head_pose_T_camera,
                                    gaze_point_camera, cam_param[cam_id][0])
+                # Get 3D face landmarks.
+                fm = transform_face_model_3d(head_pose_R_camera, head_pose_T_camera, face_model)
 
                 subject_id_list.append(subject_id)
                 frame_id_list.append(frame_id)
@@ -157,6 +160,7 @@ def process_subjects(partition="train"):
                 gaze_point_camera_list.append(gaze_point_camera)
                 face_centre_camera_list.append(face_centre)
                 face_landmarks_crop_list.append(landmarks_warped)
+                face_landmarks_3d_list.append(fm)
                 head_rotation_list.append(R)
                 warp_matrix_list.append(W)
 
@@ -168,10 +172,12 @@ def process_subjects(partition="train"):
              "gaze_point_camera_list": np.stack(gaze_point_camera_list),
              "face_centre_camera_list": np.stack(face_centre_camera_list),
              "face_landmarks_crop_list": np.stack(face_landmarks_crop_list),
+             "face_landmarks_3d_list": np.stack(face_landmarks_3d_list),
              "head_rotation_list": np.stack(head_rotation_list),
              "warp_matrix_list": np.stack(warp_matrix_list)})
 
     # # Load annotation old.
+    # subject_id = 92
     # annotation_train = {}
     # with open(XGAZE_PATH + "data/annotation_train/subject%04d.csv" % subject_id, "r") as f:
     #     lines = f.readlines()
@@ -186,8 +192,7 @@ def process_subjects(partition="train"):
     #         if frame_name not in annotation_train:
     #             annotation_train[frame_name] = {}
     #         annotation_train[frame_name][img_cam_name] = annotation
-
-    # # Initialise write file.
+    #
     # for frame_folder_name in os.listdir(XGAZE_PATH + "data/" + partition + "/subject%04d" % subject_id):
     #     frame_id = int(frame_folder_name[5:])
     #     for i in range(CAM_NUMBER):
@@ -218,7 +223,8 @@ def process_subjects(partition="train"):
     #                                       face_centre[:, 2, None]],
     #                                      axis=1)
     #         face_centre = face_centre.flatten()
-
+    #
+    #         print(transform_face_model_3d(head_pose_R_camera, head_pose_T_camera, face_model))
     #         fm = cam_to_img(transform_face_model_3d(head_pose_R_camera, head_pose_T_camera, face_model), cam_param[i][0])
     #         fm_crop = np.concatenate([cv2.perspectiveTransform(fm[:, None, :2], W, (224, 224))[:, 0, :], fm[:, 2, None]],
     #                                  axis=1)
@@ -230,12 +236,14 @@ def process_subjects(partition="train"):
     #                 cv2.perspectiveTransform(gaze_point_image[:, None, :2], W, (224, 224))[:, 0, :],
     #                 gaze_point_image[:, 2, None]], axis=1)[0]
     #
-    #         for j in landmarks_warped:
-    #             cv2.drawMarker(frame_warped, (int(j[0]), int(j[1])), (0, 255, 0),
-    #                            markerSize=4, markerType=cv2.MARKER_TILTED_CROSS, thickness=1)
-    #         for j in fm_crop:
-    #             cv2.drawMarker(frame_warped, (int(j[0]), int(j[1])), (0, 0, 255),
-    #                            markerSize=4, markerType=cv2.MARKER_TILTED_CROSS, thickness=1)
+    #         for idx, j in enumerate(landmarks_warped[17:48]):
+    #             cv2.putText(frame_warped, str(idx), (int(j[0]), int(j[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 255, 0))
+    #             # cv2.drawMarker(frame_warped, (int(j[0]), int(j[1])), (0, 255, 0),
+    #             #                markerSize=4, markerType=cv2.MARKER_TILTED_CROSS, thickness=1)
+    #         for idx, j in enumerate(fm_crop[1:32]):
+    #             cv2.putText(frame_warped, str(idx), (int(j[0]), int(j[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 255))
+    #             # cv2.drawMarker(frame_warped, (int(j[0]), int(j[1])), (0, 0, 255),
+    #             #                markerSize=4, markerType=cv2.MARKER_TILTED_CROSS, thickness=1)
     #         # for j in face_landmarks:
     #         #     cv2.drawMarker(frame, (int(j[0]), int(j[1])), (0, 255, 0),
     #         #                    markerSize=20, markerType=cv2.MARKER_TILTED_CROSS, thickness=5)
@@ -253,7 +261,7 @@ def process_subjects(partition="train"):
     #                         (0, 255, 0), thickness=2)
     #
     #         frame = cv2.resize(frame, (frame.shape[1] // 5, frame.shape[0] // 5))
-    #         cv2.imshow("", frame_warped)
+    #         cv2.imshow("", cv2.resize(frame_warped, (512, 512)))
     #         cv2.waitKey()
 
 

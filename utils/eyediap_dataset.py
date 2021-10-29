@@ -19,6 +19,7 @@ class EYEDIAP(Dataset):
                 if partition == "train" and i in eval_subjects:
                     continue
                 if partition == "test" and i not in eval_subjects:
+                    # Cross-validation and test data are all named with test. Use different subject IDs for each one.
                     continue
                 if not os.path.exists(DATASETS_PATH + "eyediap/" + str(i) +
                                       "_" + exp_id + "_" + exp_type + "_" + hdm + ".npy"):

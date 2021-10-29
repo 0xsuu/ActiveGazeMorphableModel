@@ -17,7 +17,8 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v5_swin_baseline"
+NAME = "v5_swin"
+EPOCH = "best"
 
 
 def evaluate(qualitative=False):
@@ -33,7 +34,7 @@ def evaluate(qualitative=False):
         model = AutoencoderBaseline(args)
     else:
         model = Autoencoder(args)
-    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_best.pt")
+    saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_" + EPOCH + ".pt")
 
     # # Version change fixing. Modify the saved state dict for backward compatibility.
     # new_saved_state_dict = OrderedDict()
@@ -49,7 +50,7 @@ def evaluate(qualitative=False):
     model.eval()
 
     # Load test dataset.
-    test_data = EYEDIAP(partition="test", eval_subject=16, head_movement=["M", "S"])
+    test_data = EYEDIAP(partition="test", eval_subjects=[16], head_movement=["M", "S"])
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
 
     frame_transform = Resize(224)
@@ -57,7 +58,7 @@ def evaluate(qualitative=False):
     r_eye_patch_transformation = Grayscale()
 
     # Initiate video writer. The qualitative result will be saved in a video.
-    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_full.mov",
+    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_" + EPOCH + ".mov",
                                             cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
 
     l_gaze_angle_errors_rot = []  # Gaze angle error calculated by rotation ground truth.
@@ -295,12 +296,14 @@ def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_cen
 
 
 if __name__ == '__main__':
-    if os.path.exists(LOGS_PATH + NAME + "/eval.txt"):
-        os.remove(LOGS_PATH + NAME + "/eval.txt")
+    if os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"):
+        os.remove(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt")
+        while os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"):
+            pass
 
     console_handler = logging.StreamHandler()
     logging.basicConfig(
-        handlers=[logging.FileHandler(filename=LOGS_PATH + NAME + "/eval.txt"), console_handler],
+        handlers=[logging.FileHandler(filename=LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"), console_handler],
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(message)s", datefmt="[%Y-%m-%d %H:%M:%S]")
     console_handler.setLevel(logging.INFO)

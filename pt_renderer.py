@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 from constants import *
-from utils.xgaze_dataset import cam_to_img
+from utils.xgaze_dataset import cam_to_img, perspective_transform
 
 
 class ProjectedMeshRasterizer(nn.Module):
@@ -101,7 +101,7 @@ class PTRenderer(nn.Module):
 
         return vertices_img, cameras
 
-    def forward(self, vertices, textures, camera_parameters=None):
+    def forward(self, vertices, textures, camera_parameters=None, warp_matrices=None):
         if camera_parameters is not None:
             # # Camera configured as recommended. Not projecting to the right position though.
             # cameras2 = PerspectiveCameras(R=cam_R, T=cam_T,
@@ -121,16 +121,21 @@ class PTRenderer(nn.Module):
                 vertices, cameras = self.project_world_to_img(vertices, camera_parameters)
             else:
                 # Assume only intrinsics are passed.
-                cam_K = torch.zeros((camera_parameters.shape[0], 4, 4), dtype=torch.float32, device=device,
+                cam_K = torch.zeros((warp_matrices.shape[0], 4, 4), dtype=torch.float32, device=device,
                                     requires_grad=False)
-                cam_K[:, 0, 0] = camera_parameters[:, 0, 0]
-                cam_K[:, 0, 2] = camera_parameters[:, 0, 2]
-                cam_K[:, 1, 1] = camera_parameters[:, 1, 1]
-                cam_K[:, 1, 2] = camera_parameters[:, 1, 2]
+                cam_K[:, 0, 0] = warp_matrices[:, 0, 0]
+                cam_K[:, 0, 2] = warp_matrices[:, 0, 2]
+                cam_K[:, 1, 1] = warp_matrices[:, 1, 1]
+                cam_K[:, 1, 2] = warp_matrices[:, 1, 2]
                 cam_K[:, 2, 3] = 1
                 cam_K[:, 3, 2] = 1
+                cam_R = torch.tensor([[ 1., -0., -0.],
+                                      [-0., -1., -0.],
+                                      [-0., -0., -1.]], dtype=torch.float32, device=device).repeat(warp_matrices.shape[0], 1, 1)
+                cam_T = torch.tensor([[0., 0., 1.]], dtype=torch.float32, device=device).repeat(warp_matrices.shape[0], 1)
                 vertices = cam_to_img(vertices, camera_parameters)
-                cameras = PerspectiveCameras(K=cam_K, device=device)
+                vertices = perspective_transform(vertices, warp_matrices)
+                cameras = PerspectiveCameras(R=cam_R, T=cam_T, device=device)  # TODO: wrong, two perspective transforms have to be performed.
             projected_vertices = vertices[:, :, :2].clone()
 
             # # Inplace version starts.
@@ -145,9 +150,13 @@ class PTRenderer(nn.Module):
 
             # Non-inplace version.
             # vertices_01 = torch.stack([vertices[:, :, 0] - 80, vertices[:, :, 1]], dim=2)
+
             vertices_01 = (vertices[:, :, :2] / self.face_crop_size * 2 - 1) * -1
 
-            vertices_2 = vertices[:, :, 2] * -1
+            if warp_matrices is None:
+                vertices_2 = vertices[:, :, 2] * -1
+            else:
+                vertices_2 = vertices[:, :, 2]
             vertices_2 = vertices_2 - (vertices_2.min() - 0.01)
             vertices_2 = vertices_2 / (vertices_2.max() + 0.01)
 

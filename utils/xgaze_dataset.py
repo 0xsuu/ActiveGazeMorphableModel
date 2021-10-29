@@ -64,13 +64,13 @@ class XGazeDataset(Dataset):
         if partition == "train" or partition == "cv":
             for i in os.listdir(XGAZE_PATH + "processed/train/"):
                 sid = int(i[7:11])
-                # if (partition == "train" and sid < 92) or (partition == "cv" and sid >= 92):
-                #     if os.name == "nt":
-                #         self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", swmr=True)
-                #     else:
-                #         self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", driver="core")
-                if (partition == "train" and sid == 92) or (partition == "cv" and sid == 92):
-                    self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", driver="core")
+                if (partition == "train" and sid < 92) or (partition == "cv" and sid >= 92):
+                    if os.name == "nt":
+                        self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", swmr=True)
+                    else:
+                        self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", driver="core")
+                # if (partition == "train" and sid == 92) or (partition == "cv" and sid == 92):
+                #     self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/train/" + i, "r", driver="core")
 
             # Load additional labels.
             add_labels = np.load(XGAZE_PATH + "processed/additional_labels_train.npy", allow_pickle=True)[()]
@@ -79,6 +79,10 @@ class XGazeDataset(Dataset):
                 availability_mask = self.subject_ids < 92
             else:
                 availability_mask = self.subject_ids >= 92
+            # if partition == "train":
+            #     availability_mask = self.subject_ids == 92
+            # else:
+            #     availability_mask = self.subject_ids == 92
             self.subject_ids = torch.from_numpy(
                 self.subject_ids[availability_mask]).to(device=device, dtype=torch.long)
             self.frame_ids = torch.from_numpy(
@@ -91,12 +95,19 @@ class XGazeDataset(Dataset):
                 add_labels["face_centre_camera_list"][availability_mask]).to(device=device, dtype=torch.float32)
             self.landmarks = torch.from_numpy(
                 add_labels["face_landmarks_crop_list"][availability_mask]).to(device=device, dtype=torch.float32)
+            self.landmarks_3d = torch.from_numpy(
+                add_labels["face_landmarks_3d_list"][availability_mask]).to(device=device, dtype=torch.float32)
             self.head_rotations = torch.from_numpy(
                 add_labels["head_rotation_list"][availability_mask]).to(device=device, dtype=torch.float32)
             self.warp_matrices = torch.from_numpy(
                 add_labels["warp_matrix_list"][availability_mask]).to(device=device, dtype=torch.float32)
         elif partition == "test":
             raise NotImplemented
+
+        # Flip z-axis.
+        # self.gaze_targets[:, 2] *= -1
+        # self.gaze_origins[:, 2] *= -1
+        # self.landmarks_3d[:, :, 2] *= -1
 
         # Load camera info.
         self.cam_intrinsics = torch.from_numpy(
@@ -125,7 +136,8 @@ class XGazeDataset(Dataset):
 
         data = {"subject_ids": self.subject_ids[item], "frame_ids": self.frame_ids[item], "cam_ids": self.cam_ids[item],
                 "target_3d_crop": self.gaze_targets[item], "gaze_origins": self.gaze_origins[item],
-                "face_landmarks_crop": self.landmarks[item][17:48], "head_rotations": self.head_rotations[item],
+                "face_landmarks_crop": self.landmarks[item][17:48], "face_landmarks_3d": self.landmarks_3d[item][1:32],
+                "head_rotations": self.head_rotations[item],
                 "warp_matrices": self.warp_matrices[item], "cam_intrinsics": self.cam_intrinsics[self.cam_ids[item]],
                 "frames": image, "face_gazes": face_gaze}
 
@@ -147,13 +159,10 @@ if __name__ == '__main__':
     for i in tqdm(range(len(dataset))):
         dt = dataset[i]
 
-        frame = dt["frames"].cpu().numpy()
+        frame = dt["frames"].cpu().numpy() / 255.
         lms = dt["face_landmarks_crop"]
         face_centre = dt["gaze_origins"].unsqueeze(0)
         gaze_target = dt["target_3d_crop"].unsqueeze(0)
-        # gaze_target_rot = Autoencoder.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
-        #                                                      torch.tensor([[0., 0., 0.]], device=device), dt["face_gaze"].unsqueeze(0))
-        # gaze_target_rot = torch.bmm(gaze_target_rot, torch.linalg.inv(dt["head_rotation"]).T.unsqueeze(0)) * 100. + face_centre
         gaze_target_rot = generate_face_gaze_vector(dt["face_gazes"].unsqueeze(0), dt["head_rotations"].unsqueeze(0))
         gaze_target_rot = face_centre + gaze_target_rot * 100.
 

@@ -13,11 +13,13 @@ from pt_renderer import PTRenderer
 
 
 class FlameModel(nn.Module):
-    def __init__(self, model_path, albedo_path, mask_path, landmark_path, masks=None, initial_R=None, initial_T=None):
+    def __init__(self, model_path, albedo_path, mask_path, landmark_path, masks=None,
+                 initial_R=None, initial_T=None, initial_scale=None):
         super().__init__()
 
         self.initial_R = initial_R
         self.initial_T = initial_T
+        self.initial_scale = initial_scale
 
         # Load geometry 3DMM.
         with open(model_path, "rb") as f:
@@ -27,7 +29,12 @@ class FlameModel(nn.Module):
         faces = model_file["f"]
 
         # template_v shape: (1, 5023, 3).
-        template_v = template_v - template_v.mean(0) + np.array([-0.4753, 0.3760, 0.0805])
+        if initial_R is None:
+            # Initialisation for eyediap.
+            template_v = template_v - template_v.mean(0) + np.array([-0.4753, 0.3760, 0.0805])
+        else:
+            # Zero mean.
+            template_v = template_v - template_v.mean(0)
         self.register_buffer("template_v", torch.from_numpy(template_v)
                              .to(device=device, dtype=torch.float32).unsqueeze(0))
         # shape_dirs shape: (5023, 3, 400).
@@ -89,8 +96,10 @@ class FlameModel(nn.Module):
         tex = torch.clip(tex, 0., 1.)
 
         if self.initial_R is not None:
+            # vert = torch.cat([vert[:, :, :2], vert[:, :, 2, None] * -1], dim=2)
             vert = torch.baddbmm(self.initial_T.unsqueeze(0).repeat(shape_params.shape[0], 1, 1),
-                                 vert, self.initial_R.T.unsqueeze(0).repeat(shape_params.shape[0], 1, 1))
+                                 vert * self.initial_scale,
+                                 self.initial_R.T.unsqueeze(0).repeat(shape_params.shape[0], 1, 1))
         return vert, tex
 
     def mask_faces(self, mask):
