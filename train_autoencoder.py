@@ -27,8 +27,8 @@ def train():
         train_data = EYEDIAP(partition="train", eval_subjects=[11, 16], head_movement=["S", "M"])
         validation_data = EYEDIAP(partition="test", eval_subjects=[11], head_movement=["S", "M"])
     else:
-        train_data = XGazeDataset(partition="train")
-        validation_data = XGazeDataset(partition="cv")
+        train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
+        validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
@@ -396,8 +396,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v5_swin_xgaze"
-    args.epochs = 150
+    args.name = "v5_swin_xgaze_sple01_1500"
+    args.epochs = 1500
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
@@ -425,6 +425,7 @@ if __name__ == '__main__':
     # args.lambda8 /= 2
 
     args.batch_size = 32
+    # args.test_batch_size = 256
 
     if args.dataset == "xgaze":
         args.lambda1 *= 10.

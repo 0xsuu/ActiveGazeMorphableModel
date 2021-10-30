@@ -58,7 +58,10 @@ def generate_face_gaze_vector(face_gaze_pitch_yaw, head_rotation):
 
 
 class XGazeDataset(Dataset):
-    def __init__(self, partition="train"):
+    def __init__(self, partition="train", ratio_sampling=1.):
+        # Sample a subset of the whole dataset, uniformly across subjects and cams.
+        self.ratio_sampling = ratio_sampling
+
         # Load dataset info.
         self.subject_files = {}
         if partition == "train" or partition == "cv":
@@ -120,9 +123,16 @@ class XGazeDataset(Dataset):
             self.idx_to_sid += [(sid, i) for i in range(n)]
 
     def __len__(self):
-        return len(self.idx_to_sid)
+        return int(len(self.idx_to_sid) * self.ratio_sampling)
 
     def __getitem__(self, item):
+        if self.ratio_sampling < 1.:
+            all_subject_ids = torch.unique(self.subject_ids)
+            sid = all_subject_ids[torch.randint(high=all_subject_ids.size(0), size=(1,))[0]]
+            random_cam = torch.randint(high=18, size=(1,))[0]
+            all_items = torch.where(torch.logical_and(self.subject_ids == sid, self.cam_ids == random_cam))[0]
+            item = all_items[torch.randint(high=all_items.shape[0], size=(1,))[0]]
+
         sid, idx = self.idx_to_sid[item]
 
         h5_file = self.subject_files[sid]
