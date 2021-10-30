@@ -26,7 +26,7 @@ def gaze_target_loss(gaze_target_pred, gaze_target_gt):
 
 
 def gaze_divergence_loss(gaze_divergence_distance):
-    return torch.mean(gaze_divergence_distance)
+    return torch.mean(gaze_divergence_distance ** 2)
 
 
 def gaze_pose_loss(left_gaze_rot_pred, left_gaze_rot_gt, right_gaze_rot_pred, right_gaze_rot_gt):

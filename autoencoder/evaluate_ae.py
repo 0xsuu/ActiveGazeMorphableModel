@@ -17,7 +17,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v5_swin_resnet"
+NAME = "v5_swin_lossbalance"
 EPOCH = "best"
 
 

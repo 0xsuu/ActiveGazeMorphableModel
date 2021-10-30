@@ -155,6 +155,7 @@ class Encoder(nn.Module):
     def __init__(self, out_channel, network="ResNet18"):
         super().__init__()
         self.network = network
+        self.sigmas = nn.Parameter(torch.ones(6))
 
         if network == "ResNet18":
             # ResNet18.

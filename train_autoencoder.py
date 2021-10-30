@@ -24,8 +24,8 @@ from utils.xgaze_dataset import XGazeDataset, cam_to_img, perspective_transform
 def train():
     # Load datasets.
     if args.dataset == "eyediap":
-        train_data = EYEDIAP(partition="train", eval_subjects=[11, 16], head_movement=["S", "M"])
-        validation_data = EYEDIAP(partition="test", eval_subjects=[11], head_movement=["S", "M"])
+        train_data = EYEDIAP(partition="train", eval_subjects=[1, 15, 16], head_movement=["S", "M"])
+        validation_data = EYEDIAP(partition="test", eval_subjects=[1, 15], head_movement=["S", "M"])
     else:
         train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
         validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
@@ -52,7 +52,10 @@ def train():
     def calculate_losses(data_, results_, partition_):
         batch_size = results_["left_gaze"].shape[0]
 
+        loss_weights = model.encoder.sigmas
+
         total_loss_weighted = 0
+        total_loss_weighted += torch.sum(loss_weights)
         if args.pixel_loss:
             loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
             if args.eye_patch:
@@ -63,12 +66,12 @@ def train():
                     r_eye_patch_transformation(results_["right_eye_patch"].permute(0, 3, 1, 2)).permute(0, 2, 3, 1),
                     right_eye_img.permute(0, 2, 3, 1))
             training_logger.log_batch_loss("pixel_loss", loss_pixel.item(), partition_, batch_size)
-            total_loss_weighted += loss_pixel * args.lambda1
+            total_loss_weighted += loss_pixel * torch.exp(-loss_weights[0]) #* args.lambda1
 
         if args.landmark_loss:
             loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
             training_logger.log_batch_loss("landmark_loss", loss_landmark.item(), partition_, batch_size)
-            total_loss_weighted += loss_landmark * args.lambda2
+            total_loss_weighted += loss_landmark * torch.exp(-loss_weights[1])#* args.lambda2
 
         if args.eye_loss:
             if args.dataset == "eyediap":
@@ -77,24 +80,23 @@ def train():
             else:
                 # Using face point loss instead of eye positions for x-gaze dataset.
                 # loss_eye = F.l1_loss(results_["face_centre"], data_["gaze_origins"])
-                loss_face = F.l1_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
-                training_logger.log_batch_loss("3d_face_loss", loss_face.item(), partition_, batch_size)
-                total_loss_weighted += loss_face * 1
-            # training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
-            # total_loss_weighted += loss_eye * args.lambda3
+                # loss_eye = F.l1_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
+                loss_eye = F.mse_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
+            training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
+            total_loss_weighted += loss_eye * torch.exp(-loss_weights[2])#* args.lambda3
 
         if args.gaze_tgt_loss:
             if args.dataset == "eyediap":
                 loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             else:
-                loss_gaze_target = F.l1_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+                loss_gaze_target = F.mse_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_target * args.lambda4
+            total_loss_weighted += loss_gaze_target * torch.exp(-loss_weights[3])#* args.lambda4
 
         if args.gaze_div_loss:
             loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
             training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_div * args.lambda5
+            total_loss_weighted += loss_gaze_div * torch.exp(-loss_weights[4])#* args.lambda5
 
         face_gaze_pred = None
         if args.gaze_pose_loss:
@@ -113,7 +115,7 @@ def train():
                 # total_loss_weighted += loss_gaze_vector * args.lambda6
 
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_pose * args.lambda6
+            total_loss_weighted += loss_gaze_pose * torch.exp(-loss_weights[5])#* args.lambda6
         # else:
         #     # TODO: look forward regulariser. Range from [-45, 45] for all azimuth and elevation. Not working.
         #     l_rot = results_["left_eye_rotation"]
@@ -158,7 +160,7 @@ def train():
                                        partition_, batch_size)
 
         return total_loss_weighted
-    # torch.autograd.set_detect_anomaly(True)
+
     logging.info("Start training...")
     full_start_time = time.time()
     frame_transform = Resize(224)
@@ -396,7 +398,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v5_swin_xgaze_sple01_1500"
+    # args.name = "v5_swin_cv115t16_lb"
+    args.name = "v5_swin_xgaze_lb"
     args.epochs = 1500
     args.seed = 1
     args.lr = 5e-5
@@ -408,7 +411,7 @@ if __name__ == '__main__':
     # args.network = "ResNet18"
     args.eye_patch = False
 
-    args.pix_loss = False
+    args.pix_loss = True
     args.landmark_loss = True
     args.eye_loss = True
     args.gaze_tgt_loss = True
@@ -422,10 +425,10 @@ if __name__ == '__main__':
     args.lambda4 *= 10.
 
     args.lambda7 *= 10.
-    # args.lambda8 /= 2
+    args.lambda8 *= 10.
 
     args.batch_size = 32
-    # args.test_batch_size = 256
+    args.test_batch_size = 256
 
     if args.dataset == "xgaze":
         args.lambda1 *= 10.
@@ -435,7 +438,8 @@ if __name__ == '__main__':
         args.lambda5 *= 2
         args.lambda6 *= 100.
         args.lambda7 *= 500.
-        args.lambda8 *= 10.
+        # args.lambda8 *= 10.
+        args.lambda8 *= 500.
 
     args.override = True
 
