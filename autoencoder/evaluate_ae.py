@@ -36,15 +36,6 @@ def evaluate(qualitative=False):
         model = Autoencoder(args)
     saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_" + EPOCH + ".pt")
 
-    # # Version change fixing. Modify the saved state dict for backward compatibility.
-    # new_saved_state_dict = OrderedDict()
-    # for k, v in saved_state_dict.items():
-    #     if "encoder" in k and "net" not in k:
-    #         new_saved_state_dict[".".join(["encoder", "net"] + k.split(".")[1:])] = v
-    #     else:
-    #         new_saved_state_dict[k] = v
-    # saved_state_dict = new_saved_state_dict
-
     # Load checkpoint and set to evaluate.
     model.load_state_dict(saved_state_dict)
     model.eval()

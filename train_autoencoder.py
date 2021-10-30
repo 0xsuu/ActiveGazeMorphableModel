@@ -76,12 +76,12 @@ def train():
                                     data_["left_eyeball_3d_crop"], data_["right_eyeball_3d_crop"])
             else:
                 # Using face point loss instead of eye positions for x-gaze dataset.
-                loss_eye = F.l1_loss(results_["face_centre"], data_["gaze_origins"])
+                # loss_eye = F.l1_loss(results_["face_centre"], data_["gaze_origins"])
                 loss_face = F.l1_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
                 training_logger.log_batch_loss("3d_face_loss", loss_face.item(), partition_, batch_size)
                 total_loss_weighted += loss_face * 1
-            training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
-            total_loss_weighted += loss_eye * args.lambda3
+            # training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
+            # total_loss_weighted += loss_eye * args.lambda3
 
         if args.gaze_tgt_loss:
             if args.dataset == "eyediap":
@@ -247,45 +247,46 @@ def train():
             result_img_np_none = np.all(result_img_np == [0., 1., 0.], axis=2)
             result_img_np[result_img_np_none] = gt_img_np[result_img_np_none]
 
-            # lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
-            # lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
-            #
-            # lm_f3d_pred = cam_to_img(results["face_landmarks_3d"], data["cam_intrinsics"])
-            # lm_f3d_pred = perspective_transform(lm_f3d_pred, data["warp_matrices"])
-            #
-            # for idx, lm in enumerate(data["face_landmarks_crop"][j]):
-            #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 1, 0))
-            # for idx, lm in enumerate(results["face_landmarks"][j]):
-            #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 0, 1))
-            # # for idx, lm in enumerate(lm_f3d[j]):
-            # #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 1, 0))
-            # # for idx, lm in enumerate(lm_f3d_pred[j]):
-            # #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 1))
-            #
-            # fc = cam_to_img(results["face_centre"], data["cam_intrinsics"])
-            # fc = perspective_transform(fc, data["warp_matrices"])[j, 0]
-            # gc = cam_to_img(data["target_3d_crop"], data["cam_intrinsics"])
-            # gc = perspective_transform(gc, data["warp_matrices"])[j, 0]
-            # lc = cam_to_img(results["l_eyeball_centre"], data["cam_intrinsics"])
-            # lc = perspective_transform(lc, data["warp_matrices"])[j, 0]
-            # rc = cam_to_img(results["r_eyeball_centre"], data["cam_intrinsics"])
-            # rc = perspective_transform(rc, data["warp_matrices"])[j, 0]
-            # ft = cam_to_img(results["sb"], data["cam_intrinsics"])
-            # ft = perspective_transform(ft, data["warp_matrices"])[j, 0]
-            # ft2 = cam_to_img(results["sb2"], data["cam_intrinsics"])
-            # ft2 = perspective_transform(ft2, data["warp_matrices"])[j, 0]
-            # cv2.arrowedLine(gt_img_np,
-            #                 (int(lc[0]), int(lc[1])),
-            #                 (int(ft[0]), int(ft[1])),
-            #                 (0, 0, 1), thickness=1)
-            # cv2.arrowedLine(gt_img_np,
-            #                 (int(rc[0]), int(rc[1])),
-            #                 (int(ft2[0]), int(ft2[1])),
-            #                 (0, 1, 1), thickness=1)
-            # cv2.arrowedLine(gt_img_np,
-            #                 (int(fc[0]), int(fc[1])),
-            #                 (int(gc[0]), int(gc[1])),
-            #                 (0, 1, 0), thickness=1)
+            if args.dataset == "xgaze":
+                lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
+                lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
+
+                lm_f3d_pred = cam_to_img(results["face_landmarks_3d"], data["cam_intrinsics"])
+                lm_f3d_pred = perspective_transform(lm_f3d_pred, data["warp_matrices"])
+                #
+                # for idx, lm in enumerate(data["face_landmarks_crop"][j]):
+                #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 1, 0))
+                # for idx, lm in enumerate(results["face_landmarks"][j]):
+                #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 0, 1))
+                for idx, lm in enumerate(lm_f3d[j]):
+                    cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 1, 0))
+                for idx, lm in enumerate(lm_f3d_pred[j]):
+                    cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 1))
+
+                fc = cam_to_img(results["face_centre"], data["cam_intrinsics"])
+                fc = perspective_transform(fc, data["warp_matrices"])[j, 0]
+                gc = cam_to_img(data["target_3d_crop"], data["cam_intrinsics"])
+                gc = perspective_transform(gc, data["warp_matrices"])[j, 0]
+                lc = cam_to_img(results["l_eyeball_centre"], data["cam_intrinsics"])
+                lc = perspective_transform(lc, data["warp_matrices"])[j, 0]
+                rc = cam_to_img(results["r_eyeball_centre"], data["cam_intrinsics"])
+                rc = perspective_transform(rc, data["warp_matrices"])[j, 0]
+                ft = cam_to_img(results["sb"], data["cam_intrinsics"])
+                ft = perspective_transform(ft, data["warp_matrices"])[j, 0]
+                ft2 = cam_to_img(results["sb2"], data["cam_intrinsics"])
+                ft2 = perspective_transform(ft2, data["warp_matrices"])[j, 0]
+                cv2.arrowedLine(gt_img_np,
+                                (int(lc[0]), int(lc[1])),
+                                (int(ft[0]), int(ft[1])),
+                                (0, 0, 1), thickness=1)
+                cv2.arrowedLine(gt_img_np,
+                                (int(rc[0]), int(rc[1])),
+                                (int(ft2[0]), int(ft2[1])),
+                                (0, 1, 1), thickness=1)
+                cv2.arrowedLine(gt_img_np,
+                                (int(fc[0]), int(fc[1])),
+                                (int(gc[0]), int(gc[1])),
+                                (0, 1, 0), thickness=1)
 
             cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
             cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
@@ -395,24 +396,24 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v5_swin_cv11t16"
+    args.name = "v5_swin_xgaze"
     args.epochs = 150
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
 
-    # args.dataset = "xgaze"
+    args.dataset = "xgaze"
 
     args.network = "Swin"
     # args.network = "ResNet18"
     args.eye_patch = False
 
-    # args.pix_loss = True
-    # args.landmark_loss = True
-    # args.eye_loss = False
-    # args.gaze_tgt_loss = False
-    # args.gaze_div_loss = True
-    # args.gaze_pose_loss = True
+    args.pix_loss = False
+    args.landmark_loss = True
+    args.eye_loss = True
+    args.gaze_tgt_loss = True
+    args.gaze_div_loss = True
+    args.gaze_pose_loss = True
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -428,11 +429,12 @@ if __name__ == '__main__':
     if args.dataset == "xgaze":
         args.lambda1 *= 10.
         args.lambda2 *= 1
-        args.lambda3 *= 5e-2
+        args.lambda3 *= 1e-3
         args.lambda4 *= 1e-3
         args.lambda5 *= 2
         args.lambda6 *= 100.
-        args.lambda7 *= 10.
+        args.lambda7 *= 500.
+        args.lambda8 *= 10.
 
     args.override = True
 
