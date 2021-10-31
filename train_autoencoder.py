@@ -24,8 +24,8 @@ from utils.xgaze_dataset import XGazeDataset, cam_to_img, perspective_transform
 def train():
     # Load datasets.
     if args.dataset == "eyediap":
-        train_data = EYEDIAP(partition="train", eval_subjects=[1, 15, 16], head_movement=["S", "M"])
-        validation_data = EYEDIAP(partition="test", eval_subjects=[1, 15], head_movement=["S", "M"])
+        train_data = EYEDIAP(partition="train", eval_subjects=[1, 14, 15, 16], head_movement=["S", "M"])
+        validation_data = EYEDIAP(partition="test", eval_subjects=[1, 14], head_movement=["S", "M"])
     else:
         train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
         validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
@@ -37,6 +37,10 @@ def train():
         model = AutoencoderBaseline(args)
     else:
         model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
+
+    # TODO: load model weights!
+    saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_sple01/model_best.pt")
+    model.load_state_dict(saved_state_dict, strict=False)
 
     # Log source code for records.
     logging_source_code(model)
@@ -398,14 +402,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v5_swin_cv115t16_lb"
+    # args.name = "v5_swin_cv114t1516_lb"
     args.name = "v5_swin_xgaze_lb"
-    args.epochs = 1500
+    args.dataset = "xgaze"
+
+    if args.dataset == "eyediap":
+        args.epochs = 150
+    else:
+        args.epochs = 1500
     args.seed = 1
     args.lr = 5e-5
     args.lr_scheduler = None
-
-    args.dataset = "xgaze"
 
     args.network = "Swin"
     # args.network = "ResNet18"
@@ -425,7 +432,7 @@ if __name__ == '__main__':
     args.lambda4 *= 10.
 
     args.lambda7 *= 10.
-    args.lambda8 *= 10.
+    args.lambda8 *= 2.  # TODO: gaile
 
     args.batch_size = 32
     args.test_batch_size = 256
@@ -439,7 +446,7 @@ if __name__ == '__main__':
         args.lambda6 *= 100.
         args.lambda7 *= 500.
         # args.lambda8 *= 10.
-        args.lambda8 *= 500.
+        args.lambda8 *= 50.
 
     args.override = True
 
