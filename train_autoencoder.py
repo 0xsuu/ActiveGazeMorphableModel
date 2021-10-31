@@ -27,8 +27,8 @@ def train():
         train_data = EYEDIAP(partition="train", eval_subjects=[1, 14, 15, 16], head_movement=["S", "M"])
         validation_data = EYEDIAP(partition="test", eval_subjects=[1, 14], head_movement=["S", "M"])
     else:
-        train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
-        validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
+        train_data = XGazeDataset(partition="train", ratio_sampling=1.0)
+        validation_data = XGazeDataset(partition="cv", ratio_sampling=1.0)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
@@ -403,7 +403,7 @@ if __name__ == '__main__':
 
     """ Insert argument override here. """
     # args.name = "v5_swin_cv114t1516_lb"
-    args.name = "v5_swin_xgaze_lb"
+    args.name = "v5_swin_xgaze_lb_full"
     args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
