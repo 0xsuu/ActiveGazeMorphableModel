@@ -17,8 +17,9 @@ from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 from utils.xgaze_dataset import XGazeDataset
 
-NAME = "test_v5_swin_xgaze"
+NAME = "v5_swin_xgaze_lb"
 EPOCH = "best"
+PARTITION = "cv"
 
 
 def evaluate(qualitative=False):
@@ -38,7 +39,7 @@ def evaluate(qualitative=False):
     model.eval()
 
     # Load test dataset.
-    test_data = XGazeDataset(partition="cv")
+    test_data = XGazeDataset(partition=PARTITION)
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
 
     rot_angle_errors = []

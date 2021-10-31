@@ -38,9 +38,9 @@ def train():
     else:
         model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
 
-    # TODO: load model weights!
-    saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_sple01/model_best.pt")
-    model.load_state_dict(saved_state_dict, strict=False)
+    # # TODO: load model weights!
+    # saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_sple01/model_best.pt")
+    # model.load_state_dict(saved_state_dict, strict=False)
 
     # Log source code for records.
     logging_source_code(model)
@@ -402,9 +402,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v5_swin_cv114t1516_lb"
-    args.name = "v5_swin_xgaze_lb_full"
-    args.dataset = "xgaze"
+    args.name = "v6_114t1516_lb"
+    # args.name = "v5_swin_xgaze_lb_full"
+    # args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
         args.epochs = 150
@@ -435,9 +435,10 @@ if __name__ == '__main__':
     args.lambda8 *= 2.  # TODO: gaile
 
     args.batch_size = 32
-    args.test_batch_size = 256
 
     if args.dataset == "xgaze":
+        args.test_batch_size = 256
+
         args.lambda1 *= 10.
         args.lambda2 *= 1
         args.lambda3 *= 1e-3
@@ -505,4 +506,5 @@ if __name__ == '__main__':
     v3: fix bugs from v2.
     v4: v3 + nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal and new dataset without outliers.
     v5: +eye patch option for training. FIXED EYE POSE LOSS.
+    v6: +automatic loss weight, cv.
     """
