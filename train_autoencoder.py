@@ -38,9 +38,9 @@ def train():
     else:
         model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
 
-    # TODO: load model weights!
-    saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_lb/model_best.pt")
-    model.load_state_dict(saved_state_dict, strict=False)
+    # # TODO: load model weights!
+    # saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_lb/model_best.pt")
+    # model.load_state_dict(saved_state_dict, strict=False)
 
     # Log source code for records.
     logging_source_code(model)
@@ -430,7 +430,7 @@ if __name__ == '__main__':
 
     """ Insert argument override here. """
     # args.name = "v6_114t1516_lb"
-    args.name = "v5_swin_xgaze_full"
+    args.name = "v5_swin_xgaze_no_origin_sp"
     args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
@@ -447,7 +447,7 @@ if __name__ == '__main__':
 
     args.pix_loss = True
     args.landmark_loss = True
-    args.eye_loss = True
+    args.eye_loss = False
     args.gaze_tgt_loss = True
     args.gaze_div_loss = True
     args.gaze_pose_loss = True
@@ -475,8 +475,10 @@ if __name__ == '__main__':
         args.lambda5 *= 2
         args.lambda6 *= 100.
         args.lambda7 *= 500.
-        args.lambda8 *= 10.
+        args.lambda8 *= 2.
         # args.lambda8 *= 50.
+
+        args.lambda6 = 0  # No gaze pose loss.
 
     args.override = True
 
