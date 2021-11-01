@@ -30,6 +30,10 @@ def evaluate(qualitative=False):
         # Backward compatibility.
         if not hasattr(args, "dataset"):
             args.dataset = "eyediap"
+        if not hasattr(args, "auto_weight_loss"):
+            args.auto_weight_loss = False
+            if "lb" in NAME:
+                args.auto_weight_loss = True
 
     model = Autoencoder(args)
     saved_state_dict = torch.load(LOGS_PATH + NAME + "/model_" + EPOCH + ".pt")
@@ -40,13 +44,21 @@ def evaluate(qualitative=False):
 
     # Load test dataset.
     test_data = XGazeDataset(partition=PARTITION)
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_data, batch_size=256, shuffle=False, num_workers=0)
 
+    if PARTITION == "test":
+        rot_pred_list = []
+        rot_pred_ogt_list = []
     rot_angle_errors = []
+    rot_angle_errors_ogt = []
     f_gaze_angle_errors_tgt = []
-    f_gaze_angle_errors_tgt_gt = []
+    f_gaze_angle_errors_tgt_ogt = []
     progress = tqdm(test_loader)
+    # counter = 0
     for data in progress:
+        # if counter >= 256:
+        #     break
+        # counter += 1
         gt_img = data["frames"].to(torch.float32) / 255.
         camera_parameters = data["cam_intrinsics"]
         warp_matrices = data["warp_matrices"]
@@ -60,35 +72,58 @@ def evaluate(qualitative=False):
             results = model(gt_img_input, camera_parameters, warp_matrices)
 
         # Extract forward results.
-        target_pred = results["gaze_point_mid"][:, 0].cpu().numpy()
-        origin_pred = results["face_centre"].cpu().numpy()
-        rot_pred = vector_to_pitchyaw(((origin_pred - target_pred)[0] @ head_rotation[0].cpu().numpy().T)[None, :])
+        target_pred = results["gaze_point_mid"][:, 0]
+        origin_pred = results["face_centre"]
+        rot_pred = vector_to_pitchyaw(
+            ((origin_pred - target_pred).unsqueeze(1) @ torch.transpose(head_rotation, 1, 2))[:, 0].cpu().numpy())
 
-        target_gt = data["target_3d_crop"].cpu().numpy()
-        origin_gt = data["gaze_origins"].cpu().numpy()
-        rot_gt = data["face_gazes"].cpu().numpy()
+        origin_gt = data["gaze_origins"]
+        rot_pred_ogt = vector_to_pitchyaw(
+            ((origin_gt - target_pred).unsqueeze(1) @ torch.transpose(head_rotation, 1, 2))[:, 0].cpu().numpy())
 
         if qualitative:
             pass
 
         # Calculate angle errors.
-        rot_angle_errors.append(get_angle(pitchyaw_to_vector(rot_pred), pitchyaw_to_vector(rot_gt)))
-        f_gaze_angle_errors_tgt.append(get_angle(target_pred - origin_pred, target_gt - origin_gt))
-        f_gaze_angle_errors_tgt_gt.append(get_angle(target_pred - origin_gt, target_gt - origin_gt))
+        if PARTITION != "test":
+            target_gt = data["target_3d_crop"]
+            rot_gt = data["face_gazes"].cpu().numpy()
 
-        progress.set_description("rot: %.05f, tgt: %.05f, tgt_gt: %.05f" %
-                                 (np.mean(rot_angle_errors),
-                                  np.mean(f_gaze_angle_errors_tgt), np.mean(f_gaze_angle_errors_tgt_gt)))
+            rot_angle_errors.append(angular_error(pitchyaw_to_vector(rot_pred), pitchyaw_to_vector(rot_gt)))
+            rot_angle_errors_ogt.append(angular_error(pitchyaw_to_vector(rot_pred_ogt), pitchyaw_to_vector(rot_gt)))
+            f_gaze_angle_errors_tgt.append(angular_error((target_pred - origin_pred).cpu().numpy(),
+                                                         (target_gt - origin_gt).cpu().numpy()))
+            f_gaze_angle_errors_tgt_ogt.append(angular_error((target_pred - origin_gt).cpu().numpy(),
+                                                             (target_gt - origin_gt).cpu().numpy()))
 
-    logging.info("Face gaze tgt error, mean: " + str(np.mean(rot_angle_errors)) +
-                 ", std: " + str(np.std(rot_angle_errors)) +
-                 ", median: " + str(np.median(rot_angle_errors)))
-    logging.info("Face gaze tgt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt)) +
-                 ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
-                 ", median: " + str(np.median(f_gaze_angle_errors_tgt)))
-    logging.info("Face gaze tgt gt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt_gt)) +
-                 ", std: " + str(np.std(f_gaze_angle_errors_tgt_gt)) +
-                 ", median: " + str(np.median(f_gaze_angle_errors_tgt_gt)))
+            progress.set_description("rot: %.05f, rot_ogt: %.05f, tgt: %.05f, tgt_ogt: %.05f" %
+                                     (np.mean([j.mean() for j in rot_angle_errors]),
+                                      np.mean([j.mean() for j in rot_angle_errors_ogt]),
+                                      np.mean([j.mean() for j in f_gaze_angle_errors_tgt]),
+                                      np.mean([j.mean() for j in f_gaze_angle_errors_tgt_ogt])))
+        else:
+            rot_pred_list.append(rot_pred)
+            rot_pred_ogt_list.append(rot_pred_ogt)
+
+    if PARTITION == "test":
+        rot_pred_list = np.concatenate(rot_pred_list, axis=0)
+        rot_pred_ogt_list = np.concatenate(rot_pred_ogt_list, axis=0)
+
+        np.savetxt(LOGS_PATH + NAME + "/within_eva_results.txt", rot_pred_list, delimiter=",")
+        np.savetxt(LOGS_PATH + NAME + "/within_eva_results_ogt.txt", rot_pred_ogt_list, delimiter=",")
+    else:
+        rot_angle_errors = np.concatenate(rot_angle_errors, axis=0)
+        f_gaze_angle_errors_tgt = np.concatenate(f_gaze_angle_errors_tgt, axis=0)
+        f_gaze_angle_errors_tgt_ogt = np.concatenate(f_gaze_angle_errors_tgt_ogt, axis=0)
+        logging.info("Face gaze tgt error, mean: " + str(np.mean(rot_angle_errors)) +
+                     ", std: " + str(np.std(rot_angle_errors)) +
+                     ", median: " + str(np.median(rot_angle_errors)))
+        logging.info("Face gaze tgt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt)) +
+                     ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
+                     ", median: " + str(np.median(f_gaze_angle_errors_tgt)))
+        logging.info("Face gaze tgt gt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt_ogt)) +
+                     ", std: " + str(np.std(f_gaze_angle_errors_tgt_ogt)) +
+                     ", median: " + str(np.median(f_gaze_angle_errors_tgt_ogt)))
 
 
 def vector_to_pitchyaw(vectors):

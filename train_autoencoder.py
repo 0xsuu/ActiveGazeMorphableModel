@@ -38,9 +38,9 @@ def train():
     else:
         model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
 
-    # # TODO: load model weights!
-    # saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_sple01/model_best.pt")
-    # model.load_state_dict(saved_state_dict, strict=False)
+    # TODO: load model weights!
+    saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_lb/model_best.pt")
+    model.load_state_dict(saved_state_dict, strict=False)
 
     # Log source code for records.
     logging_source_code(model)
@@ -56,10 +56,12 @@ def train():
     def calculate_losses(data_, results_, partition_):
         batch_size = results_["left_gaze"].shape[0]
 
-        loss_weights = model.encoder.sigmas
-
-        total_loss_weighted = 0
-        total_loss_weighted += torch.sum(loss_weights)
+        loss_weights = None
+        if args.auto_weight_loss:
+            loss_weights = model.encoder.sigmas
+            total_loss_weighted = torch.sum(loss_weights)
+        else:
+            total_loss_weighted = 0
         if args.pixel_loss:
             loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
             if args.eye_patch:
@@ -70,12 +72,18 @@ def train():
                     r_eye_patch_transformation(results_["right_eye_patch"].permute(0, 3, 1, 2)).permute(0, 2, 3, 1),
                     right_eye_img.permute(0, 2, 3, 1))
             training_logger.log_batch_loss("pixel_loss", loss_pixel.item(), partition_, batch_size)
-            total_loss_weighted += loss_pixel * torch.exp(-loss_weights[0]) #* args.lambda1
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_pixel * torch.exp(-loss_weights[0])
+            else:
+                total_loss_weighted += loss_pixel * args.lambda1
 
         if args.landmark_loss:
             loss_landmark = landmark_loss(results_["face_landmarks"], data_["face_landmarks_crop"])
             training_logger.log_batch_loss("landmark_loss", loss_landmark.item(), partition_, batch_size)
-            total_loss_weighted += loss_landmark * torch.exp(-loss_weights[1])#* args.lambda2
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_landmark * torch.exp(-loss_weights[1])
+            else:
+                total_loss_weighted += loss_landmark * args.lambda2
 
         if args.eye_loss:
             if args.dataset == "eyediap":
@@ -87,7 +95,10 @@ def train():
                 # loss_eye = F.l1_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
                 loss_eye = F.mse_loss(results_["face_landmarks_3d"], data_["face_landmarks_3d"])
             training_logger.log_batch_loss("eye_loss", loss_eye.item(), partition_, batch_size)
-            total_loss_weighted += loss_eye * torch.exp(-loss_weights[2])#* args.lambda3
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_eye * torch.exp(-loss_weights[2])
+            else:
+                total_loss_weighted += loss_eye * args.lambda3
 
         if args.gaze_tgt_loss:
             if args.dataset == "eyediap":
@@ -95,12 +106,18 @@ def train():
             else:
                 loss_gaze_target = F.mse_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_target * torch.exp(-loss_weights[3])#* args.lambda4
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_gaze_target * torch.exp(-loss_weights[3])
+            else:
+                total_loss_weighted += loss_gaze_target * args.lambda4
 
         if args.gaze_div_loss:
             loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
             training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_div * torch.exp(-loss_weights[4])#* args.lambda5
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_gaze_div * torch.exp(-loss_weights[4])#* args.lambda5
+            else:
+                total_loss_weighted += loss_gaze_div * args.lambda5
 
         face_gaze_pred = None
         if args.gaze_pose_loss:
@@ -111,15 +128,22 @@ def train():
                 # loss_gaze_pose = F.mse_loss(results_["face_gaze_az_el"], data_["face_gazes"])
                 # Additional gaze vector loss.
                 face_gaze_pred = results_["gaze_point_mid"].squeeze(1) - results_["face_centre"]
+                face_gaze_pred = torch.bmm(face_gaze_pred.unsqueeze(1),
+                                           torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
                 face_gaze_pred_n = face_gaze_pred / torch.linalg.norm(face_gaze_pred, dim=1, keepdim=True)
                 face_gaze_gt = data_["target_3d_crop"] - data_["gaze_origins"]
+                face_gaze_gt = torch.bmm(face_gaze_gt.unsqueeze(1),
+                                         torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
                 face_gaze_gt_n = face_gaze_gt / torch.linalg.norm(face_gaze_gt, dim=1, keepdim=True)
                 loss_gaze_pose = F.mse_loss(face_gaze_pred_n, face_gaze_gt_n)
                 # training_logger.log_batch_loss("gaze_vector_loss", loss_gaze_vector.item(), partition_, batch_size)
                 # total_loss_weighted += loss_gaze_vector * args.lambda6
 
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
-            total_loss_weighted += loss_gaze_pose * torch.exp(-loss_weights[5])#* args.lambda6
+            if args.auto_weight_loss:
+                total_loss_weighted += loss_gaze_pose * torch.exp(-loss_weights[5])
+            else:
+                total_loss_weighted += loss_gaze_pose * args.lambda6
         # else:
         #     # TODO: look forward regulariser. Range from [-45, 45] for all azimuth and elevation. Not working.
         #     l_rot = results_["left_eye_rotation"]
@@ -354,6 +378,9 @@ if __name__ == '__main__':
     parser.add_argument("--test_batch_size", type=int, default=32, metavar="N",
                         help="Batch size for evaluating.")
 
+    parser.add_argument("--auto_weight_loss", type=bool, default=False,
+                        help="Auto balance all loss functions.")
+
     # Loss function hyper-parameters.
     parser.add_argument("--lambda1", type=float, default=1.,
                         help="Lambda to balance loss function.")
@@ -402,9 +429,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v6_114t1516_lb"
-    # args.name = "v5_swin_xgaze_lb_full"
-    # args.dataset = "xgaze"
+    # args.name = "v6_114t1516_lb"
+    args.name = "v5_swin_xgaze_full"
+    args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
         args.epochs = 150
@@ -424,6 +451,8 @@ if __name__ == '__main__':
     args.gaze_tgt_loss = True
     args.gaze_div_loss = True
     args.gaze_pose_loss = True
+
+    args.auto_weight_loss = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -446,8 +475,8 @@ if __name__ == '__main__':
         args.lambda5 *= 2
         args.lambda6 *= 100.
         args.lambda7 *= 500.
-        # args.lambda8 *= 10.
-        args.lambda8 *= 50.
+        args.lambda8 *= 10.
+        # args.lambda8 *= 50.
 
     args.override = True
 

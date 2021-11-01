@@ -29,6 +29,10 @@ def evaluate(qualitative=False):
         # Backward compatibility.
         if not hasattr(args, "dataset"):
             args.dataset = "eyediap"
+        if not hasattr(args, "auto_weight_loss"):
+            args.auto_weight_loss = False
+            if "lb" in NAME:
+                args.auto_weight_loss = True
 
     if "baseline" in NAME:
         model = AutoencoderBaseline(args)
@@ -166,10 +170,10 @@ def evaluate(qualitative=False):
             get_angle(r_gaze_rot - r_eyeball_centre_orig,
                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy()))
         l_gaze_angle_errors_rot_gt.append(
-            get_angle(results["left_gaze"][0].cpu().numpy(),
+            get_angle(results["left_gaze"][:, 0].cpu().numpy(),
                       data["target_3d_crop"].cpu().numpy() - data["left_eyeball_3d_crop"].cpu().numpy()))
         r_gaze_angle_errors_rot_gt.append(
-            get_angle(results["right_gaze"][0].cpu().numpy(),
+            get_angle(results["right_gaze"][:, 0].cpu().numpy(),
                       data["target_3d_crop"].cpu().numpy() - data["right_eyeball_3d_crop"].cpu().numpy()))
 
         l_gaze_angle_errors_tgt.append(
@@ -241,6 +245,7 @@ def revert_to_original_position(point_3d, face_box_tl, cam_intrinsics, cam_R, ca
 
 
 def get_angle(vec_a, vec_b):
+    assert vec_a.shape == (1, 3) and vec_b.shape == (1, 3)
     return np.rad2deg(np.arccos(np.dot(vec_a[0], vec_b[0]) / (np.linalg.norm(vec_a[0]) * np.linalg.norm(vec_b[0]))))
 
 

@@ -74,18 +74,17 @@ def normalise_face(img, face_model, landmarks, hr, ht, gc, cam):
     hR_norm = np.dot(R, hR)  # Rotation matrix in normalized space.
     hr_norm = cv2.Rodrigues(hR_norm)[0]  # Convert rotation matrix to rotation vectors.
 
-    # Normalise gaze vector.
-    gc = gc.reshape((3, 1))
-    gc_normalised = gc - face_centre  # Gaze vector.
-    gc_normalised = np.dot(R, gc_normalised)
-    gc_normalised = gc_normalised / np.linalg.norm(gc_normalised)
+    # # Normalise gaze vector.
+    # gc = gc.reshape((3, 1))
+    # gc_normalised = gc - face_centre  # Gaze vector.
+    # gc_normalised = np.dot(R, gc_normalised)
+    # gc_normalised = gc_normalised / np.linalg.norm(gc_normalised)
+    gc_normalised = None
 
     # Warp the facial landmarks.
     landmarks_warped = cv2.perspectiveTransform(landmarks[:, None, :], W)
     landmarks_warped = landmarks_warped.reshape(-1, 2)
 
-    # Return normalised and cropped image,
-    #        head pose rotation,
     return img_warped, hr_norm, gc_normalised, landmarks_warped, R, face_centre.flatten(), W
 
 
@@ -135,18 +134,24 @@ def process_subjects(partition="train"):
     warp_matrix_list = []
     for subject_file in tqdm(os.listdir(XGAZE_PATH + "data/annotation_" + partition)):
         subject_id = int(subject_file[7:11])
-        with open(XGAZE_PATH + "data/annotation_train/subject%04d.csv" % subject_id, "r") as f:
+        with open(XGAZE_PATH + "data/annotation_" + partition + "/subject%04d.csv" % subject_id, "r") as f:
             lines = f.readlines()
             for li in lines:
                 li = li.split(",")
                 frame_id = int(li[0][5:])
                 cam_id = int(li[1][3:5])
                 rest = np.array(li[2:], dtype=np.float)
-                gaze_point_screen = rest[:2]
-                gaze_point_camera = rest[2:5]
-                head_pose_R_camera = rest[5:8]
-                head_pose_T_camera = rest[8:11]
-                face_landmarks = rest[11:].reshape(-1, 2)
+                if partition == "train":
+                    gaze_point_screen = rest[:2]
+                    gaze_point_camera = rest[2:5]
+                    head_pose_R_camera = rest[5:8]
+                    head_pose_T_camera = rest[8:11]
+                    face_landmarks = rest[11:].reshape(-1, 2)
+                else:
+                    gaze_point_camera = None
+                    head_pose_R_camera = rest[:3]
+                    head_pose_T_camera = rest[3:6]
+                    face_landmarks = rest[6:].reshape(-1, 2)
 
                 _, _, _, landmarks_warped, R, face_centre, W = \
                     normalise_face(None, face_lm_model, face_landmarks, head_pose_R_camera, head_pose_T_camera,
@@ -157,7 +162,8 @@ def process_subjects(partition="train"):
                 subject_id_list.append(subject_id)
                 frame_id_list.append(frame_id)
                 cam_id_list.append(cam_id)
-                gaze_point_camera_list.append(gaze_point_camera)
+                if partition == "train":
+                    gaze_point_camera_list.append(gaze_point_camera)
                 face_centre_camera_list.append(face_centre)
                 face_landmarks_crop_list.append(landmarks_warped)
                 face_landmarks_3d_list.append(fm)
@@ -169,7 +175,7 @@ def process_subjects(partition="train"):
     np.save(XGAZE_PATH + "processed/additional_labels_" + partition,
             {"subject_id_list": np.stack(subject_id_list),
              "frame_id_list": np.stack(frame_id_list), "cam_id_list": np.stack(cam_id_list),
-             "gaze_point_camera_list": np.stack(gaze_point_camera_list),
+             "gaze_point_camera_list": None if len(gaze_point_camera_list) == 0 else np.stack(gaze_point_camera_list),
              "face_centre_camera_list": np.stack(face_centre_camera_list),
              "face_landmarks_crop_list": np.stack(face_landmarks_crop_list),
              "face_landmarks_3d_list": np.stack(face_landmarks_3d_list),
@@ -266,4 +272,4 @@ def process_subjects(partition="train"):
 
 
 if __name__ == '__main__':
-    process_subjects()
+    process_subjects("test")

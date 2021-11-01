@@ -42,7 +42,7 @@ class Autoencoder(nn.Module):
         if args.eye_patch:
             self.encoder = EncoderEyePatch(base_feature_channels, args.network).to(device)
         else:
-            self.encoder = Encoder(base_feature_channels, args.network).to(device)
+            self.encoder = Encoder(base_feature_channels, args.network, args.auto_weight_loss).to(device)
 
         self.face_model = FlameModel(FLAME_PATH + "FLAME2020/generic_model.pkl",
                                      FLAME_PATH + "albedoModel2020_FLAME_albedoPart.npz",

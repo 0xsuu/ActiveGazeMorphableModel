@@ -57,9 +57,15 @@ def generate_face_gaze_vector(face_gaze_pitch_yaw, head_rotation):
     return gaze_target_rot
 
 
+test_sn_list = ["subject0001.h5", "subject0002.h5", "subject0020.h5", "subject0023.h5", "subject0037.h5",
+                "subject0064.h5", "subject0068.h5", "subject0070.h5", "subject0082.h5", "subject0087.h5",
+                "subject0049.h5", "subject0091.h5", "subject0112.h5", "subject0114.h5", "subject0118.h5"]
+
+
 class XGazeDataset(Dataset):
     def __init__(self, partition="train", ratio_sampling=1.):
         # Sample a subset of the whole dataset, uniformly across subjects and cams.
+        self.partition = partition
         self.ratio_sampling = ratio_sampling
 
         # Load dataset info.
@@ -86,31 +92,39 @@ class XGazeDataset(Dataset):
             #     availability_mask = self.subject_ids == 92
             # else:
             #     availability_mask = self.subject_ids == 92
-            self.subject_ids = torch.from_numpy(
-                self.subject_ids[availability_mask]).to(device=device, dtype=torch.long)
-            self.frame_ids = torch.from_numpy(
-                add_labels["frame_id_list"][availability_mask]).to(device=device, dtype=torch.long)
-            self.cam_ids = torch.from_numpy(
-                add_labels["cam_id_list"][availability_mask]).to(device=device, dtype=torch.long)
             self.gaze_targets = torch.from_numpy(
                 add_labels["gaze_point_camera_list"][availability_mask]).to(device=device, dtype=torch.float32)
-            self.gaze_origins = torch.from_numpy(
-                add_labels["face_centre_camera_list"][availability_mask]).to(device=device, dtype=torch.float32)
-            self.landmarks = torch.from_numpy(
-                add_labels["face_landmarks_crop_list"][availability_mask]).to(device=device, dtype=torch.float32)
-            self.landmarks_3d = torch.from_numpy(
-                add_labels["face_landmarks_3d_list"][availability_mask]).to(device=device, dtype=torch.float32)
-            self.head_rotations = torch.from_numpy(
-                add_labels["head_rotation_list"][availability_mask]).to(device=device, dtype=torch.float32)
-            self.warp_matrices = torch.from_numpy(
-                add_labels["warp_matrix_list"][availability_mask]).to(device=device, dtype=torch.float32)
-        elif partition == "test":
-            raise NotImplemented
 
-        # Flip z-axis.
-        # self.gaze_targets[:, 2] *= -1
-        # self.gaze_origins[:, 2] *= -1
-        # self.landmarks_3d[:, :, 2] *= -1
+        elif partition == "test":
+            for sn in test_sn_list:
+                sid = int(sn[7:11])
+                if os.name == "nt":
+                    self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/test/" + sn, "r", swmr=True)
+                else:
+                    self.subject_files[sid] = h5py.File(XGAZE_PATH + "processed/test/" + sn, "r", driver="core")
+            # Load additional labels.
+            add_labels = np.load(XGAZE_PATH + "processed/additional_labels_train.npy", allow_pickle=True)[()]
+            self.subject_ids = add_labels["subject_id_list"]
+            availability_mask = np.ones_like(self.subject_ids, dtype=np.bool)
+        else:
+            raise ValueError("No such partition:", partition)
+
+        self.subject_ids = torch.from_numpy(
+            self.subject_ids[availability_mask]).to(device=device, dtype=torch.long)
+        self.frame_ids = torch.from_numpy(
+            add_labels["frame_id_list"][availability_mask]).to(device=device, dtype=torch.long)
+        self.cam_ids = torch.from_numpy(
+            add_labels["cam_id_list"][availability_mask]).to(device=device, dtype=torch.long)
+        self.gaze_origins = torch.from_numpy(
+            add_labels["face_centre_camera_list"][availability_mask]).to(device=device, dtype=torch.float32)
+        self.landmarks = torch.from_numpy(
+            add_labels["face_landmarks_crop_list"][availability_mask]).to(device=device, dtype=torch.float32)
+        self.landmarks_3d = torch.from_numpy(
+            add_labels["face_landmarks_3d_list"][availability_mask]).to(device=device, dtype=torch.float32)
+        self.head_rotations = torch.from_numpy(
+            add_labels["head_rotation_list"][availability_mask]).to(device=device, dtype=torch.float32)
+        self.warp_matrices = torch.from_numpy(
+            add_labels["warp_matrix_list"][availability_mask]).to(device=device, dtype=torch.float32)
 
         # Load camera info.
         self.cam_intrinsics = torch.from_numpy(
@@ -141,16 +155,19 @@ class XGazeDataset(Dataset):
         image = torch.from_numpy(h5_file["face_patch"][idx, :]).to(device, dtype=torch.float32)
         # image = image[:, :, ::-1]  # From BGR to RGB.
 
-        # Get gaze.
-        face_gaze = torch.from_numpy(h5_file["face_gaze"][idx, :]).to(device, dtype=torch.float32)
-
         data = {"subject_ids": self.subject_ids[item], "frame_ids": self.frame_ids[item], "cam_ids": self.cam_ids[item],
-                "target_3d_crop": self.gaze_targets[item], "gaze_origins": self.gaze_origins[item],
+                "gaze_origins": self.gaze_origins[item],
                 "face_landmarks_crop": self.landmarks[item][17:48], "face_landmarks_3d": self.landmarks_3d[item][1:32],
                 "head_rotations": self.head_rotations[item],
                 "warp_matrices": self.warp_matrices[item], "cam_intrinsics": self.cam_intrinsics[self.cam_ids[item]],
-                "frames": image, "face_gazes": face_gaze}
+                "frames": image, }
 
+        if self.partition != "test":
+            # Get gaze.
+            data["target_3d_crop"] = self.gaze_targets[item]
+
+            face_gaze = torch.from_numpy(h5_file["face_gaze"][idx, :]).to(device, dtype=torch.float32)
+            data["face_gazes"] = face_gaze
         return data
 
     @property
