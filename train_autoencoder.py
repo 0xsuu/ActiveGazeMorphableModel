@@ -2,6 +2,8 @@
 import cv2
 import numpy as np
 import time
+
+import pathos.parallel
 import torch
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
@@ -438,7 +440,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v7_15t16_nor_l1"
+    args.name = "v7_15t16_nor_l1"
     # args.name = "v5_swin_xgaze_no_origin_sp02"
     # args.dataset = "xgaze"
 
@@ -520,6 +522,8 @@ if __name__ == '__main__':
             shutil.rmtree(LOGS_PATH + "tf_board/" + args.name)
         else:
             raise ValueError("Name has been used.")
+    while os.path.exists(log_name_dir) or os.path.exists(LOGS_PATH + "tf_board/" + args.name):
+        pass
     os.mkdir(log_name_dir)
 
     # Initialise logging config.
