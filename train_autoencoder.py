@@ -24,11 +24,11 @@ from utils.xgaze_dataset import XGazeDataset, cam_to_img, perspective_transform
 def train():
     # Load datasets.
     if args.dataset == "eyediap":
-        train_data = EYEDIAP(partition="train", eval_subjects=[1, 14, 15, 16], head_movement=["S", "M"])
-        validation_data = EYEDIAP(partition="test", eval_subjects=[1, 14], head_movement=["S", "M"])
+        train_data = EYEDIAP(partition="train", eval_subjects=[15, 16], head_movement=["S", "M"])
+        validation_data = EYEDIAP(partition="test", eval_subjects=[16], head_movement=["S", "M"])
     else:
-        train_data = XGazeDataset(partition="train", ratio_sampling=1.0)
-        validation_data = XGazeDataset(partition="cv", ratio_sampling=1.0)
+        train_data = XGazeDataset(partition="train", ratio_sampling=0.2)
+        validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
@@ -191,7 +191,11 @@ def train():
 
     logging.info("Start training...")
     full_start_time = time.time()
-    frame_transform = Resize(224)
+    frame_transform = transforms.Compose([
+        Resize(224),
+        # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+        transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
+    ])
     l_eye_patch_transformation = Grayscale()
     r_eye_patch_transformation = Grayscale()
     for epoch in range(1, args.epochs + 1):
@@ -325,6 +329,11 @@ def train():
 
         """ Epoch ends.
         """
+        if args.auto_weight_loss:
+            logging.info(torch.exp(-model.encoder.sigmas.detach()))
+        if args.dataset == "xgaze":
+            train_data.epoch_end()
+            validation_data.epoch_end()
         training_logger.log_epoch({"epoch": epoch,
                                    "model_weights": model.state_dict(),
                                    "model": model,
@@ -345,7 +354,7 @@ def time_format(time_diff):
 
 def logging_source_code(ae):
     # Logging file and model information.
-    logging.debug(ae)
+    # logging.debug(ae)
     with open(PROJECT_PATH + "train_autoencoder.py", "r", encoding="utf-8") as f:
         logging.debug("*** File content for train_autoencoder.py ***")
         logging.debug("".join(f.readlines()))
@@ -429,9 +438,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    # args.name = "v6_114t1516_lb"
-    args.name = "v5_swin_xgaze_no_origin_sp"
-    args.dataset = "xgaze"
+    # args.name = "v7_15t16_nor_l1"
+    # args.name = "v5_swin_xgaze_no_origin_sp02"
+    # args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
         args.epochs = 150
@@ -447,12 +456,12 @@ if __name__ == '__main__':
 
     args.pix_loss = True
     args.landmark_loss = True
-    args.eye_loss = False
+    args.eye_loss = True
     args.gaze_tgt_loss = True
     args.gaze_div_loss = True
     args.gaze_pose_loss = True
 
-    args.auto_weight_loss = False
+    # args.auto_weight_loss = True
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
@@ -461,7 +470,7 @@ if __name__ == '__main__':
     args.lambda4 *= 10.
 
     args.lambda7 *= 10.
-    args.lambda8 *= 2.  # TODO: gaile
+    args.lambda8 *= 1.  # TODO: gaile
 
     args.batch_size = 32
 
@@ -475,7 +484,7 @@ if __name__ == '__main__':
         args.lambda5 *= 2
         args.lambda6 *= 100.
         args.lambda7 *= 500.
-        args.lambda8 *= 2.
+        args.lambda8 *= 1.
         # args.lambda8 *= 50.
 
         args.lambda6 = 0  # No gaze pose loss.
@@ -537,5 +546,6 @@ if __name__ == '__main__':
     v3: fix bugs from v2.
     v4: v3 + nosteplr_lrby2_lmd1by10_lmd2d05_ltgteyex10_l7x10_nogal and new dataset without outliers.
     v5: +eye patch option for training. FIXED EYE POSE LOSS.
-    v6: +automatic loss weight, cv.
+    v6: +automatic loss weight.
+    v7: new training scheme. Normalise.
     """

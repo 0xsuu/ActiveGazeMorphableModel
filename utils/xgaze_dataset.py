@@ -136,6 +136,8 @@ class XGazeDataset(Dataset):
             n = h5_file["face_patch"].shape[0]
             self.idx_to_sid += [(sid, i) for i in range(n)]
 
+        self.item_unseen = torch.ones_like(self.subject_ids, dtype=torch.bool)
+
     def __len__(self):
         return int(len(self.idx_to_sid) * self.ratio_sampling)
 
@@ -144,8 +146,12 @@ class XGazeDataset(Dataset):
             all_subject_ids = torch.unique(self.subject_ids)
             sid = all_subject_ids[torch.randint(high=all_subject_ids.size(0), size=(1,))[0]]
             random_cam = torch.randint(high=18, size=(1,))[0]
-            all_items = torch.where(torch.logical_and(self.subject_ids == sid, self.cam_ids == random_cam))[0]
+            all_items = torch.where(torch.logical_and(
+                torch.logical_and(self.subject_ids == sid, self.cam_ids == random_cam),
+                self.item_unseen)
+            )[0]
             item = all_items[torch.randint(high=all_items.shape[0], size=(1,))[0]]
+            self.item_unseen[item] = False
 
         sid, idx = self.idx_to_sid[item]
 
@@ -169,6 +175,9 @@ class XGazeDataset(Dataset):
             face_gaze = torch.from_numpy(h5_file["face_gaze"][idx, :]).to(device, dtype=torch.float32)
             data["face_gazes"] = face_gaze
         return data
+
+    def epoch_end(self):
+        self.item_unseen = torch.ones_like(self.subject_ids, dtype=torch.bool)
 
     @property
     def face_crop_size(self):

@@ -136,7 +136,7 @@ class Autoencoder(nn.Module):
         right_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., self.gaze_direction]]], device=device),
                                                  torch.tensor([[0., 0., 0.]], device=device), right_eye_rotation)
 
-        lr_cross = torch.cross(left_gaze, right_gaze, dim=2)
+        lr_cross = torch.cross(right_gaze, left_gaze, dim=2)
         lin_solve = torch.bmm(torch.inverse(torch.cat([left_gaze, -right_gaze, lr_cross], dim=1).transpose(1, 2)),
                               (r_eyeball_centre - l_eyeball_centre).transpose(1, 2))
         gaze_point_l = l_eyeball_centre + lin_solve[:, 0:1, :] * left_gaze
@@ -321,7 +321,7 @@ class AutoencoderBaseline(nn.Module):
         right_gaze = self.apply_eyeball_rotation(torch.tensor([[[0., 0., 1.]]], device=device),
                                                  torch.tensor([[0., 0., 0.]], device=device), right_eye_rotation)
 
-        lr_cross = torch.cross(left_gaze, right_gaze, dim=2)
+        lr_cross = torch.cross(right_gaze, left_gaze, dim=2)
         lin_solve = torch.bmm(torch.inverse(torch.cat([left_gaze, -right_gaze, lr_cross], dim=1).transpose(1, 2)),
                               (r_eyeball_centre - l_eyeball_centre).transpose(1, 2))
         gaze_point_l = l_eyeball_centre + lin_solve[:, 0:1, :] * left_gaze

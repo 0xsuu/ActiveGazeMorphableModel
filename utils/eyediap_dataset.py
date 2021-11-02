@@ -50,6 +50,12 @@ class EYEDIAP(Dataset):
         eye_img = Grayscale()(self.dataset[side + "_eye_images"].to(torch.float32).permute(0, 3, 1, 2) / 255.)
         return {"mean": torch.mean(eye_img, (0, 2, 3)), "std": torch.std(eye_img, (0, 2, 3))}
 
+    def get_frame_mean_std(self):
+        from torchvision import transforms
+        print(torch.std_mean(
+            transforms.Resize(224)((eyediap.dataset["frames"].cpu().permute(0, 3, 1, 2)) / 255.), dim=(0, 2, 3)))
+        #(tensor([0.1957, 0.1928, 0.2037]), tensor([0.2630, 0.2962, 0.4256]))
+
     def __getitem__(self, index):
         ret_dict = {}
         for key, value in self.dataset.items():
@@ -69,7 +75,9 @@ class EYEDIAP(Dataset):
 
 
 if __name__ == '__main__':
-    dl = DataLoader(EYEDIAP(), batch_size=32, shuffle=True, num_workers=0)
+    eyediap = EYEDIAP()
+    eyediap.get_frame_mean_std()
+    dl = DataLoader(eyediap, batch_size=32, shuffle=True, num_workers=0)
     for k in dl:
         break
     print()

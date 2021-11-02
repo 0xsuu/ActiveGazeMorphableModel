@@ -17,9 +17,9 @@ from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 from utils.xgaze_dataset import XGazeDataset
 
-NAME = "v5_swin_xgaze_lb"
+NAME = "v5_swin_xgaze_full"
 EPOCH = "best"
-PARTITION = "cv"
+PARTITION = "test"
 
 
 def evaluate(qualitative=False):
