@@ -68,3 +68,15 @@ def gaze_degree_error(left_eye_centre_pred, right_eye_centre_pred, left_eye_cent
         r_gaze_rad_error = np.arccos(np.sum(r_gaze_vec_pred * r_gaze_vec_gt, axis=1) /
                                      (np.linalg.norm(r_gaze_vec_pred, axis=1) * np.linalg.norm(r_gaze_vec_gt, axis=1)))
         return np.rad2deg((np.nan_to_num(l_gaze_rad_error) + np.nan_to_num(r_gaze_rad_error)) / 2).mean()
+
+
+class AddGaussianNoise(object):
+    def __init__(self, mean=0., std=1.):
+        self.std = std
+        self.mean = mean
+
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)

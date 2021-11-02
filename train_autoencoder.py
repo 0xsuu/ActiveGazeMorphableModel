@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import time
 
-import pathos.parallel
 import torch
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
@@ -15,7 +14,7 @@ import logging
 import shutil
 
 from autoencoder.loss_functions import pixel_loss, landmark_loss, eye_loss, gaze_target_loss, gaze_divergence_loss, \
-    parameters_regulariser, gaze_pose_loss, gaze_degree_error
+    parameters_regulariser, gaze_pose_loss, gaze_degree_error, AddGaussianNoise
 from autoencoder.model import Autoencoder, AutoencoderBaseline
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
@@ -65,7 +64,7 @@ def train():
         else:
             total_loss_weighted = 0
         if args.pixel_loss:
-            loss_pixel = pixel_loss(results_["img"], gt_img_input.permute(0, 2, 3, 1))
+            loss_pixel = pixel_loss(results_["img"], Resize(224)(gt_img.permute(0, 3, 1, 2)).permute(0, 2, 3, 1))
             if args.eye_patch:
                 loss_pixel += pixel_loss(
                     l_eye_patch_transformation(results_["left_eye_patch"].permute(0, 3, 1, 2)).permute(0, 2, 3, 1),
@@ -117,7 +116,7 @@ def train():
             loss_gaze_div = gaze_divergence_loss(results_["gaze_point_dist"])
             training_logger.log_batch_loss("gaze_div_loss", loss_gaze_div.item(), partition_, batch_size)
             if args.auto_weight_loss:
-                total_loss_weighted += loss_gaze_div * torch.exp(-loss_weights[4])#* args.lambda5
+                total_loss_weighted += loss_gaze_div * torch.exp(-loss_weights[4])
             else:
                 total_loss_weighted += loss_gaze_div * args.lambda5
 
@@ -196,6 +195,7 @@ def train():
     frame_transform = transforms.Compose([
         Resize(224),
         # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+        AddGaussianNoise(0, 0.2),
         transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
     ])
     l_eye_patch_transformation = Grayscale()
@@ -206,7 +206,7 @@ def train():
 
         """ Train.
         """
-        gt_img_input, results = None, None
+        gt_img_input, gt_img, results = None, None, None
         for data in tqdm(train_loader):
             # Load forward information.
             gt_img = data["frames"].to(torch.float32) / 255.
@@ -277,7 +277,7 @@ def train():
 
         if os.name == "nt" and "img" in results:
             j = 1
-            gt_img_np = gt_img_input.permute(0, 2, 3, 1)[j].detach().cpu().numpy()
+            gt_img_np = Resize(224)(gt_img.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)[j].detach().cpu().numpy()
             result_img_np = results["img"][j].detach().cpu().numpy()
 
             result_img_np_none = np.all(result_img_np == [0., 1., 0.], axis=2)
