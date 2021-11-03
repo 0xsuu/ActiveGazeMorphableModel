@@ -8,6 +8,7 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 import numpy as np
+from torchvision import transforms
 from torchvision.transforms import Resize, Grayscale
 from tqdm import tqdm
 from psbody.mesh import Mesh
@@ -17,8 +18,9 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v5_swin_cv115t16_lb"
+NAME = "v7_15t16_nor_l2high"
 EPOCH = "best"
+SUBJECT_IDS = [16]
 
 
 def evaluate(qualitative=False):
@@ -45,10 +47,15 @@ def evaluate(qualitative=False):
     model.eval()
 
     # Load test dataset.
-    test_data = EYEDIAP(partition="test", eval_subjects=[16], head_movement=["M", "S"])
+    test_data = EYEDIAP(partition="test", eval_subjects=SUBJECT_IDS, head_movement=["M", "S"])
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False, num_workers=0)
 
-    frame_transform = Resize(224)
+    frame_transform = transforms.Compose([
+        Resize(224),
+        # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+        # AddGaussianNoise(0, 0.2),
+        transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
+    ])
     l_eye_patch_transformation = Grayscale()
     r_eye_patch_transformation = Grayscale()
 
@@ -143,7 +150,15 @@ def evaluate(qualitative=False):
                       l_eyeball_centre_screen, target_screen_l, r_eyeball_centre_screen, target_screen_r)
 
             if "img" in results:
+                # # Normalisation correction.
+                # rendered_frame = results["img"][0].cpu().numpy()
+                # mask = np.all(rendered_frame != [0., 1., 0.], axis=2)
+                # rendered_frame[mask] = rendered_frame[mask] * np.array([0.1957, 0.1928, 0.2037])[None, :] + \
+                #                        np.array([0.2630, 0.2962, 0.4256])[None, :]
+                # rendered = (rendered_frame * 255).astype(np.uint8)
+                # No normalisation correction.
                 rendered = (results["img"][0].cpu().numpy() * 255).astype(np.uint8)
+
                 rendered_none_idx = np.all(rendered == [0, 255, 0], axis=2)
                 rendered[rendered_none_idx] = cv2.resize(raw, (224, 224))[rendered_none_idx]
 

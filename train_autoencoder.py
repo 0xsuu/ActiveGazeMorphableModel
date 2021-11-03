@@ -195,7 +195,7 @@ def train():
     frame_transform = transforms.Compose([
         Resize(224),
         # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
-        AddGaussianNoise(0, 0.2),
+        # AddGaussianNoise(0, 0.2),
         transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
     ])
     l_eye_patch_transformation = Grayscale()
@@ -440,7 +440,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v7_15t16_nor_l1"
+    args.name = "v8"
     # args.name = "v5_swin_xgaze_no_origin_sp02"
     # args.dataset = "xgaze"
 
@@ -468,10 +468,11 @@ if __name__ == '__main__':
     args.lambda1 = 1.
     args.lambda2 = 0.5
 
-    args.lambda3 *= 10.
+    args.lambda3 *= 50.
+    args.lambda4 *= 50.
     args.lambda4 *= 10.
 
-    args.lambda7 *= 10.
+    args.lambda7 *= 100.
     args.lambda8 *= 1.  # TODO: gaile
 
     args.batch_size = 32
@@ -552,4 +553,5 @@ if __name__ == '__main__':
     v5: +eye patch option for training. FIXED EYE POSE LOSS.
     v6: +automatic loss weight.
     v7: new training scheme. Normalise.
+    v8: Normalise, L2 large.
     """
