@@ -18,7 +18,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v7_15t16_nor_l2high"
+NAME = "v8"
 EPOCH = "best"
 SUBJECT_IDS = [16]
 

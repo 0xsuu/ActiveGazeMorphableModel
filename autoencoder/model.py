@@ -307,7 +307,7 @@ class AutoencoderBaseline(nn.Module):
         else:
             self.encoder = Encoder(10, args.network).to(device)
 
-    def forward(self, x, camera_parameters=None):
+    def forward(self, x, camera_parameters=None, warp_matrices=None):
         # Encoder.
         latent_code = self.encoder(x)
         l_eyeball_centre = latent_code[:, None, 0:3]

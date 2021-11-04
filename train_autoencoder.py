@@ -28,7 +28,7 @@ def train():
         train_data = EYEDIAP(partition="train", eval_subjects=[15, 16], head_movement=["S", "M"])
         validation_data = EYEDIAP(partition="test", eval_subjects=[16], head_movement=["S", "M"])
     else:
-        train_data = XGazeDataset(partition="train", ratio_sampling=0.2)
+        train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
         validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
@@ -40,7 +40,7 @@ def train():
         model = Autoencoder(args, face_crop_size=train_data.face_crop_size)
 
     # # TODO: load model weights!
-    # saved_state_dict = torch.load(LOGS_PATH + "v5_swin_xgaze_lb/model_best.pt")
+    # saved_state_dict = torch.load(LOGS_PATH + "xgaze_v8/model_best.pt")
     # model.load_state_dict(saved_state_dict, strict=False)
 
     # Log source code for records.
@@ -102,10 +102,7 @@ def train():
                 total_loss_weighted += loss_eye * args.lambda3
 
         if args.gaze_tgt_loss:
-            if args.dataset == "eyediap":
-                loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
-            else:
-                loss_gaze_target = F.mse_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
             if args.auto_weight_loss:
                 total_loss_weighted += loss_gaze_target * torch.exp(-loss_weights[3])
@@ -192,12 +189,20 @@ def train():
 
     logging.info("Start training...")
     full_start_time = time.time()
-    frame_transform = transforms.Compose([
-        Resize(224),
-        # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
-        # AddGaussianNoise(0, 0.2),
-        transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
-    ])
+    if args.dataset == "eyediap":
+        frame_transform = transforms.Compose([
+            Resize(224),
+            # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+            # AddGaussianNoise(0, 0.2),
+            transforms.Normalize(mean=[0.2630, 0.2962, 0.4256], std=[0.1957, 0.1928, 0.2037])
+        ])
+    else:
+        frame_transform = transforms.Compose([
+            Resize(224),
+            # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+            # AddGaussianNoise(0, 0.2),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
     l_eye_patch_transformation = Grayscale()
     r_eye_patch_transformation = Grayscale()
     for epoch in range(1, args.epochs + 1):
@@ -284,45 +289,48 @@ def train():
             result_img_np[result_img_np_none] = gt_img_np[result_img_np_none]
 
             if args.dataset == "xgaze":
-                lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
-                lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
+                try:
+                    lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
+                    lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
 
-                lm_f3d_pred = cam_to_img(results["face_landmarks_3d"], data["cam_intrinsics"])
-                lm_f3d_pred = perspective_transform(lm_f3d_pred, data["warp_matrices"])
-                #
-                # for idx, lm in enumerate(data["face_landmarks_crop"][j]):
-                #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 1, 0))
-                # for idx, lm in enumerate(results["face_landmarks"][j]):
-                #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 0, 1))
-                for idx, lm in enumerate(lm_f3d[j]):
-                    cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 1, 0))
-                for idx, lm in enumerate(lm_f3d_pred[j]):
-                    cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 1))
+                    lm_f3d_pred = cam_to_img(results["face_landmarks_3d"], data["cam_intrinsics"])
+                    lm_f3d_pred = perspective_transform(lm_f3d_pred, data["warp_matrices"])
+                    #
+                    # for idx, lm in enumerate(data["face_landmarks_crop"][j]):
+                    #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 1, 0))
+                    # for idx, lm in enumerate(results["face_landmarks"][j]):
+                    #     cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(1, 0, 1))
+                    for idx, lm in enumerate(lm_f3d[j]):
+                        cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 1, 0))
+                    for idx, lm in enumerate(lm_f3d_pred[j]):
+                        cv2.putText(gt_img_np, str(idx), (int(lm[0]), int(lm[1])), cv2.FONT_HERSHEY_PLAIN, 0.5, color=(0, 0, 1))
 
-                fc = cam_to_img(results["face_centre"], data["cam_intrinsics"])
-                fc = perspective_transform(fc, data["warp_matrices"])[j, 0]
-                gc = cam_to_img(data["target_3d_crop"], data["cam_intrinsics"])
-                gc = perspective_transform(gc, data["warp_matrices"])[j, 0]
-                lc = cam_to_img(results["l_eyeball_centre"], data["cam_intrinsics"])
-                lc = perspective_transform(lc, data["warp_matrices"])[j, 0]
-                rc = cam_to_img(results["r_eyeball_centre"], data["cam_intrinsics"])
-                rc = perspective_transform(rc, data["warp_matrices"])[j, 0]
-                ft = cam_to_img(results["sb"], data["cam_intrinsics"])
-                ft = perspective_transform(ft, data["warp_matrices"])[j, 0]
-                ft2 = cam_to_img(results["sb2"], data["cam_intrinsics"])
-                ft2 = perspective_transform(ft2, data["warp_matrices"])[j, 0]
-                cv2.arrowedLine(gt_img_np,
-                                (int(lc[0]), int(lc[1])),
-                                (int(ft[0]), int(ft[1])),
-                                (0, 0, 1), thickness=1)
-                cv2.arrowedLine(gt_img_np,
-                                (int(rc[0]), int(rc[1])),
-                                (int(ft2[0]), int(ft2[1])),
-                                (0, 1, 1), thickness=1)
-                cv2.arrowedLine(gt_img_np,
-                                (int(fc[0]), int(fc[1])),
-                                (int(gc[0]), int(gc[1])),
-                                (0, 1, 0), thickness=1)
+                    fc = cam_to_img(results["face_centre"], data["cam_intrinsics"])
+                    fc = perspective_transform(fc, data["warp_matrices"])[j, 0]
+                    gc = cam_to_img(data["target_3d_crop"], data["cam_intrinsics"])
+                    gc = perspective_transform(gc, data["warp_matrices"])[j, 0]
+                    lc = cam_to_img(results["l_eyeball_centre"], data["cam_intrinsics"])
+                    lc = perspective_transform(lc, data["warp_matrices"])[j, 0]
+                    rc = cam_to_img(results["r_eyeball_centre"], data["cam_intrinsics"])
+                    rc = perspective_transform(rc, data["warp_matrices"])[j, 0]
+                    ft = cam_to_img(results["sb"], data["cam_intrinsics"])
+                    ft = perspective_transform(ft, data["warp_matrices"])[j, 0]
+                    ft2 = cam_to_img(results["sb2"], data["cam_intrinsics"])
+                    ft2 = perspective_transform(ft2, data["warp_matrices"])[j, 0]
+                    cv2.arrowedLine(gt_img_np,
+                                    (int(lc[0]), int(lc[1])),
+                                    (int(ft[0]), int(ft[1])),
+                                    (0, 0, 1), thickness=1)
+                    cv2.arrowedLine(gt_img_np,
+                                    (int(rc[0]), int(rc[1])),
+                                    (int(ft2[0]), int(ft2[1])),
+                                    (0, 1, 1), thickness=1)
+                    cv2.arrowedLine(gt_img_np,
+                                    (int(fc[0]), int(fc[1])),
+                                    (int(gc[0]), int(gc[1])),
+                                    (0, 1, 0), thickness=1)
+                except ValueError:
+                    pass
 
             cv2.imshow("1", cv2.resize(gt_img_np, (512, 512)))
             cv2.imshow("2", cv2.resize(result_img_np, (512, 512)))
@@ -440,8 +448,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v8"
-    # args.name = "v5_swin_xgaze_no_origin_sp02"
+    args.name = "v9"
+    # args.name = "xgaze_v8_nogt_run2"
     # args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
@@ -463,14 +471,14 @@ if __name__ == '__main__':
     args.gaze_div_loss = True
     args.gaze_pose_loss = True
 
-    # args.auto_weight_loss = True
+    args.auto_weight_loss = False
 
     args.lambda1 = 1.
     args.lambda2 = 0.5
 
-    args.lambda3 *= 50.
-    args.lambda4 *= 50.
+    args.lambda3 *= 10.
     args.lambda4 *= 10.
+    args.lambda6 *= 1.
 
     args.lambda7 *= 100.
     args.lambda8 *= 1.  # TODO: gaile
@@ -480,10 +488,10 @@ if __name__ == '__main__':
     if args.dataset == "xgaze":
         args.test_batch_size = 256
 
-        args.lambda1 *= 10.
-        args.lambda2 *= 1
+        args.lambda1 *= 1.
+        args.lambda2 *= 10
         args.lambda3 *= 1e-3
-        args.lambda4 *= 1e-3
+        args.lambda4 *= 1e-2
         args.lambda5 *= 2
         args.lambda6 *= 100.
         args.lambda7 *= 500.
@@ -554,4 +562,5 @@ if __name__ == '__main__':
     v6: +automatic loss weight.
     v7: new training scheme. Normalise.
     v8: Normalise, L2 large.
+    v9: L2/5, bug fixed.
     """
