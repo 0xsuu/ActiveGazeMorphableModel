@@ -18,9 +18,9 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v8"
+NAME = "v7_15t16_nor"
 EPOCH = "best"
-SUBJECT_IDS = [16]
+SUBJECT_IDS = [15]
 
 
 def evaluate(qualitative=False):

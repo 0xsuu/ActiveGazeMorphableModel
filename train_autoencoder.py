@@ -26,7 +26,7 @@ def train():
     # Load datasets.
     if args.dataset == "eyediap":
         train_data = EYEDIAP(partition="train", eval_subjects=[15, 16], head_movement=["S", "M"])
-        validation_data = EYEDIAP(partition="test", eval_subjects=[16], head_movement=["S", "M"])
+        validation_data = EYEDIAP(partition="test", eval_subjects=[15], head_movement=["S", "M"])
     else:
         train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
         validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
