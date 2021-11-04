@@ -476,9 +476,9 @@ if __name__ == '__main__':
     args.lambda1 = 1.
     args.lambda2 = 0.5
 
-    args.lambda3 *= 10.
-    args.lambda4 *= 10.
-    args.lambda6 *= 1.
+    args.lambda3 *= 50.
+    args.lambda4 *= 50.
+    args.lambda6 *= 10.
 
     args.lambda7 *= 100.
     args.lambda8 *= 1.  # TODO: gaile
@@ -562,5 +562,5 @@ if __name__ == '__main__':
     v6: +automatic loss weight.
     v7: new training scheme. Normalise.
     v8: Normalise, L2 large.
-    v9: L2/5, bug fixed.
+    v9: L2, bug fixed.
     """
