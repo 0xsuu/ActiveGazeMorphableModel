@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-L1 = False
+L1 = True
 
 
 def pixel_loss(image_pred, image_gt):

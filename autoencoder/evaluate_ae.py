@@ -18,8 +18,8 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v7_15t16_nor_l2high"
-EPOCH = "best"
+NAME = "v7_15t16_nor_l1_l7x2"
+EPOCH = "70"
 SUBJECT_IDS = [15]
 
 
@@ -171,7 +171,7 @@ def evaluate(qualitative=False):
 
             raw = cv2.resize(raw, (512, 512))
             raw_gaze = cv2.resize(raw_gaze, (512, 512))
-            combined = np.concatenate([raw, rendered, raw_gaze], axis=1)
+            combined = np.concatenate([raw, rendered, raw_gaze], axis=1).astype(np.uint8)
             rendered_video_writer.write(combined)
 
             # cv2.imshow("1", combined)

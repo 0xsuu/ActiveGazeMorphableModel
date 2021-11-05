@@ -25,7 +25,7 @@ from utils.xgaze_dataset import XGazeDataset, cam_to_img, perspective_transform
 def train():
     # Load datasets.
     if args.dataset == "eyediap":
-        train_data = EYEDIAP(partition="train", eval_subjects=[15, 16], head_movement=["S", "M"])
+        train_data = EYEDIAP(partition="train", eval_subjects=[15, 8], head_movement=["S", "M"])
         validation_data = EYEDIAP(partition="test", eval_subjects=[15], head_movement=["S", "M"])
     else:
         train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
@@ -448,7 +448,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v9"
+    args.name = "v9_l1_lmd7x50"
     # args.name = "xgaze_v8_nogt_run2"
     # args.dataset = "xgaze"
 
@@ -476,11 +476,11 @@ if __name__ == '__main__':
     args.lambda1 = 1.
     args.lambda2 = 0.5
 
-    args.lambda3 *= 50.
+    args.lambda3 *= 10.
     args.lambda4 *= 50.
-    args.lambda6 *= 10.
+    args.lambda6 *= 1.
 
-    args.lambda7 *= 100.
+    args.lambda7 *= 500.
     args.lambda8 *= 1.  # TODO: gaile
 
     args.batch_size = 32
