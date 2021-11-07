@@ -18,7 +18,7 @@ from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v7_15t16_nor_l1_l7x2"
+NAME = "v9_l1_lmd7x50_pixx5"
 EPOCH = "70"
 SUBJECT_IDS = [15]
 
@@ -60,7 +60,8 @@ def evaluate(qualitative=False):
     r_eye_patch_transformation = Grayscale()
 
     # Initiate video writer. The qualitative result will be saved in a video.
-    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_" + EPOCH + ".mov",
+    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_" + EPOCH + "_" +
+                                            "_".join([str(i) for i in SUBJECT_IDS]) + ".mov",
                                             cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
 
     l_gaze_angle_errors_rot = []  # Gaze angle error calculated by rotation ground truth.
@@ -77,7 +78,7 @@ def evaluate(qualitative=False):
     l_gaze_angle_errors_tgt_gt = []
     r_gaze_angle_errors_tgt_gt = []
     f_gaze_angle_errors_tgt = []
-    for data in tqdm(test_loader):
+    for idx, data in tqdm(enumerate(test_loader), total=len(test_loader)):
         gt_img = data["frames"].to(torch.float32) / 255.
         camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
 
@@ -133,6 +134,12 @@ def evaluate(qualitative=False):
         target_orig_l = revert_to_original_position(target_l, face_box_tl, cam_intrinsics, cam_R, cam_T)
         target_orig_r = revert_to_original_position(target_r, face_box_tl, cam_intrinsics, cam_R, cam_T)
 
+        angle_eror_tgt = \
+            (get_angle(
+                target_orig - l_eyeball_centre_orig,
+                data["target_3d"].cpu().numpy() - data["left_eyeball_3d"].cpu().numpy()) +
+             get_angle(target_orig - r_eyeball_centre_orig,
+                       data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy())) / 2
         if qualitative:
             raw = data["frames"][0].cpu().numpy()
             raw_gaze = raw.copy()
@@ -172,10 +179,9 @@ def evaluate(qualitative=False):
             raw = cv2.resize(raw, (512, 512))
             raw_gaze = cv2.resize(raw_gaze, (512, 512))
             combined = np.concatenate([raw, rendered, raw_gaze], axis=1).astype(np.uint8)
+            cv2.putText(combined, "frame: %d, angle error tgt: %.04f" % (idx, angle_eror_tgt),
+                        (10, 10), cv2.FONT_HERSHEY_PLAIN, 1.0, (255, 255, 255))
             rendered_video_writer.write(combined)
-
-            # cv2.imshow("1", combined)
-            # cv2.waitKey(100)
 
         # Calculate angle errors.
         l_gaze_angle_errors_rot.append(
@@ -216,6 +222,9 @@ def evaluate(qualitative=False):
     report_two_eye_gaze_angle_error("rot_crop_gt", l_gaze_angle_errors_rot_gt, r_gaze_angle_errors_rot_gt)
     report_two_eye_gaze_angle_error("tgt", l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt)
     report_two_eye_gaze_angle_error("tgt_gt", l_gaze_angle_errors_tgt_gt, r_gaze_angle_errors_tgt_gt)
+
+    np.save(LOGS_PATH + NAME + "/result_" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + "tgt",
+            np.concatenate([l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt]))
 
     logging.info("Face gaze tgt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt)) +
                  ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
@@ -307,14 +316,18 @@ def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_cen
 
 
 if __name__ == '__main__':
-    if os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"):
-        os.remove(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt")
-        while os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"):
+    if os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
+        os.remove(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt")
+        while os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH +
+                             "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
             pass
 
     console_handler = logging.StreamHandler()
     logging.basicConfig(
-        handlers=[logging.FileHandler(filename=LOGS_PATH + NAME + "/eval" + EPOCH + ".txt"), console_handler],
+        handlers=[
+            logging.FileHandler(
+                filename=LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"),
+            console_handler],
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(message)s", datefmt="[%Y-%m-%d %H:%M:%S]")
     console_handler.setLevel(logging.INFO)

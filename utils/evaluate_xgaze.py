@@ -17,7 +17,7 @@ from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 from utils.xgaze_dataset import XGazeDataset
 
-NAME = "v5_swin_xgaze_full"
+NAME = "xgaze_v8_nogt"
 EPOCH = "best"
 PARTITION = "test"
 

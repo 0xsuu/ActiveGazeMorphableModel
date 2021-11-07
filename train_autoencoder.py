@@ -4,6 +4,9 @@ import numpy as np
 import time
 
 import torch
+from psbody.mesh import MeshViewer, Mesh
+from psbody.mesh.sphere import Sphere
+from pytorch3d.transforms.rotation_conversions import matrix_to_axis_angle
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize, Grayscale, transforms, Normalize
@@ -15,7 +18,7 @@ import shutil
 
 from autoencoder.loss_functions import pixel_loss, landmark_loss, eye_loss, gaze_target_loss, gaze_divergence_loss, \
     parameters_regulariser, gaze_pose_loss, gaze_degree_error, AddGaussianNoise
-from autoencoder.model import Autoencoder, AutoencoderBaseline
+from autoencoder.model import Autoencoder, AutoencoderBaseline, find_gaze_axis_rotation_matrix
 from utils.eyediap_dataset import EYEDIAP
 from utils.logger import TrainingLogger
 from constants import *
@@ -30,6 +33,7 @@ def train():
     else:
         train_data = XGazeDataset(partition="train", ratio_sampling=0.1)
         validation_data = XGazeDataset(partition="cv", ratio_sampling=0.1)
+        # validation_data = XGazeDataset(partition="cv")
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=0)
     validation_loader = DataLoader(validation_data, batch_size=args.test_batch_size, shuffle=True, num_workers=0)
 
@@ -102,7 +106,10 @@ def train():
                 total_loss_weighted += loss_eye * args.lambda3
 
         if args.gaze_tgt_loss:
-            loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            if args.dataset == "eyediap":
+                loss_gaze_target = gaze_target_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
+            else:
+                loss_gaze_target = F.mse_loss(results_["gaze_point_mid"].squeeze(1), data_["target_3d_crop"])
             training_logger.log_batch_loss("gaze_tgt_loss", loss_gaze_target.item(), partition_, batch_size)
             if args.auto_weight_loss:
                 total_loss_weighted += loss_gaze_target * torch.exp(-loss_weights[3])
@@ -117,25 +124,36 @@ def train():
             else:
                 total_loss_weighted += loss_gaze_div * args.lambda5
 
-        face_gaze_pred = None
+        face_gaze_pred = results_["gaze_point_mid"].squeeze(1).detach() - data_["gaze_origins"]
+        face_gaze_pred = torch.bmm(face_gaze_pred.unsqueeze(1),
+                                   torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
+        face_gaze_pred_n = face_gaze_pred / torch.linalg.norm(face_gaze_pred, dim=1, keepdim=True)
+        face_gaze_gt = data_["target_3d_crop"] - data_["gaze_origins"]
+        face_gaze_gt = torch.bmm(face_gaze_gt.unsqueeze(1),
+                                 torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
+        face_gaze_gt_n = face_gaze_gt / torch.linalg.norm(face_gaze_gt, dim=1, keepdim=True)
+
         if args.gaze_pose_loss:
             if args.dataset == "eyediap":
                 loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], data_["left_eyeball_rotation_crop"],
                                                 results_["right_eye_rotation"], data_["right_eyeball_rotation_crop"])
             else:
-                # loss_gaze_pose = F.mse_loss(results_["face_gaze_az_el"], data_["face_gazes"])
                 # Additional gaze vector loss.
-                face_gaze_pred = results_["gaze_point_mid"].squeeze(1) - results_["face_centre"]
-                face_gaze_pred = torch.bmm(face_gaze_pred.unsqueeze(1),
-                                           torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
-                face_gaze_pred_n = face_gaze_pred / torch.linalg.norm(face_gaze_pred, dim=1, keepdim=True)
-                face_gaze_gt = data_["target_3d_crop"] - data_["gaze_origins"]
-                face_gaze_gt = torch.bmm(face_gaze_gt.unsqueeze(1),
-                                         torch.transpose(data["head_rotations"], 1, 2)).squeeze(1)
-                face_gaze_gt_n = face_gaze_gt / torch.linalg.norm(face_gaze_gt, dim=1, keepdim=True)
-                loss_gaze_pose = F.mse_loss(face_gaze_pred_n, face_gaze_gt_n)
-                # training_logger.log_batch_loss("gaze_vector_loss", loss_gaze_vector.item(), partition_, batch_size)
-                # total_loss_weighted += loss_gaze_vector * args.lambda6
+                l_rot = find_gaze_axis_rotation_matrix(
+                    data_["target_3d_crop"] - results_["l_eyeball_centre"].detach().squeeze(1),
+                    torch.tensor([[0., 0., -1.]], dtype=torch.float32, device=device).repeat(batch_size, 1))
+                r_rot = find_gaze_axis_rotation_matrix(
+                    data_["target_3d_crop"] - results_["r_eyeball_centre"].detach().squeeze(1),
+                    torch.tensor([[0., 0., -1.]], dtype=torch.float32, device=device).repeat(batch_size, 1))
+                loss_gaze_pose = gaze_pose_loss(results_["left_eye_rotation"], matrix_to_axis_angle(l_rot)[:, :2],
+                                                results_["right_eye_rotation"], matrix_to_axis_angle(r_rot)[:, :2])
+
+                # l_gaze_gt = data_["target_3d_crop"] - results_["l_eyeball_centre"].detach()
+                # r_gaze_gt = data_["target_3d_crop"] - results_["r_eyeball_centre"].detach()
+                # l_gaze_gt = l_gaze_gt / torch.linalg.norm(l_gaze_gt, dim=2, keepdim=True)
+                # r_gaze_gt = r_gaze_gt / torch.linalg.norm(r_gaze_gt, dim=2, keepdim=True)
+                # loss_gaze_pose = F.l1_loss(results_["left_gaze"], l_gaze_gt) + \
+                #     F.l1_loss(results_["right_gaze"], r_gaze_gt)
 
             training_logger.log_batch_loss("gaze_pose_loss", loss_gaze_pose.item(), partition_, batch_size)
             if args.auto_weight_loss:
@@ -171,11 +189,12 @@ def train():
                                                         results_["gaze_point_mid"].squeeze(1),
                                                         data_["target_3d_crop"])
         elif face_gaze_pred is not None:
-            early_stopping_criteria = \
-                np.rad2deg(np.nan_to_num(np.arccos(
-                    np.sum(
-                        face_gaze_pred_n.detach().cpu().numpy() *
-                        face_gaze_gt_n.detach().cpu().numpy(), axis=1)))).mean()
+            with torch.no_grad():
+                early_stopping_criteria = \
+                    np.rad2deg(np.nan_to_num(np.arccos(
+                        np.sum(
+                            face_gaze_pred_n.detach().cpu().numpy() *
+                            face_gaze_gt_n.detach().cpu().numpy(), axis=1)))).mean()
         else:
             early_stopping_criteria = 0.
 
@@ -205,6 +224,7 @@ def train():
         ])
     l_eye_patch_transformation = Grayscale()
     r_eye_patch_transformation = Grayscale()
+    mesh_viewer = MeshViewer()
     for epoch in range(1, args.epochs + 1):
         logging.info("*** Epoch " + str(epoch) + " ***")
         epoch_start_time = time.time()
@@ -218,9 +238,11 @@ def train():
             if args.dataset == "eyediap":
                 camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
                 warp_matrices = None
+                landmarks_3d = None
             else:
                 camera_parameters = data["cam_intrinsics"]
                 warp_matrices = data["warp_matrices"]
+                landmarks_3d = data["face_landmarks_3d"]
 
             # Preprocess images.
             if args.eye_patch:
@@ -236,7 +258,7 @@ def train():
             if args.eye_patch:
                 results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters, warp_matrices)
             else:
-                results = model(gt_img_input, camera_parameters, warp_matrices)
+                results = model(gt_img_input, camera_parameters, warp_matrices, landmarks_3d)
 
             # Calculate losses.
             loss = calculate_losses(data, results, "train")
@@ -257,9 +279,11 @@ def train():
             if args.dataset == "eyediap":
                 camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
                 warp_matrices = None
+                landmarks_3d = None
             else:
                 camera_parameters = data["cam_intrinsics"]
                 warp_matrices = data["warp_matrices"]
+                landmarks_3d = data["face_landmarks_3d"]
 
             # Preprocess images.
             if args.eye_patch:
@@ -275,13 +299,13 @@ def train():
                 if args.eye_patch:
                     results = model((gt_img_input, left_eye_img, right_eye_img), camera_parameters, warp_matrices)
                 else:
-                    results = model(gt_img_input, camera_parameters, warp_matrices)
+                    results = model(gt_img_input, camera_parameters, warp_matrices, landmarks_3d)
 
                 # Calculate losses.
                 calculate_losses(data, results, "eval")
 
         if os.name == "nt" and "img" in results:
-            j = 1
+            j = 0
             gt_img_np = Resize(224)(gt_img.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)[j].detach().cpu().numpy()
             result_img_np = results["img"][j].detach().cpu().numpy()
 
@@ -289,6 +313,13 @@ def train():
             result_img_np[result_img_np_none] = gt_img_np[result_img_np_none]
 
             if args.dataset == "xgaze":
+                mesh_viewer.set_dynamic_meshes(
+                    [Mesh(v=results["vert_masked"][j].cpu().numpy(), f=model.face_model.faces.cpu().numpy()),
+                     Sphere(data["gaze_origins"][j].cpu().numpy(), 5.).to_mesh((0,255,0)),
+                     Sphere(data["target_3d_crop"][j].cpu().numpy(), 5.).to_mesh((0,255,0)),
+                     Sphere(results["gaze_point_mid"][j].cpu().numpy(), 5.).to_mesh(color=(255,0,0))] +
+                    get_vector_sphere(data["gaze_origins"][j].cpu().numpy(),
+                                      results["gaze_point_mid"].squeeze(1)[j].detach().cpu().numpy(), 100))
                 try:
                     lm_f3d = cam_to_img(data["face_landmarks_3d"], data["cam_intrinsics"])
                     lm_f3d = perspective_transform(lm_f3d, data["warp_matrices"])
@@ -370,6 +401,11 @@ def logging_source_code(ae):
         logging.debug("".join(f.readlines()))
 
 
+def get_vector_sphere(start, end, num=10):
+    direction = end - start
+    return [Sphere(start + i * direction, 3.).to_mesh() for i in np.linspace(0, 1, num)]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train Autoencoder")
     """ Experiment configurations.
@@ -448,15 +484,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """ Insert argument override here. """
-    args.name = "v9_l1_lmd7x50"
-    # args.name = "xgaze_v8_nogt_run2"
-    # args.dataset = "xgaze"
+    # args.name = "v9_l1_lmd7x50_pixx5"
+    args.name = "xgaze_v9_3dlm"
+    args.dataset = "xgaze"
 
     if args.dataset == "eyediap":
         args.epochs = 150
     else:
         args.epochs = 1500
     args.seed = 1
+
     args.lr = 5e-5
     args.lr_scheduler = None
 
@@ -464,16 +501,16 @@ if __name__ == '__main__':
     # args.network = "ResNet18"
     args.eye_patch = False
 
-    args.pix_loss = True
+    args.pixel_loss = True
     args.landmark_loss = True
-    args.eye_loss = True
-    args.gaze_tgt_loss = True
-    args.gaze_div_loss = True
+    args.eye_loss = False
+    args.gaze_tgt_loss = False
+    args.gaze_div_loss = False
     args.gaze_pose_loss = True
 
     args.auto_weight_loss = False
 
-    args.lambda1 = 1.
+    args.lambda1 = 1. * 5.
     args.lambda2 = 0.5
 
     args.lambda3 *= 10.
@@ -488,17 +525,17 @@ if __name__ == '__main__':
     if args.dataset == "xgaze":
         args.test_batch_size = 256
 
-        args.lambda1 *= 1.
-        args.lambda2 *= 10
+        args.lambda1 = 1.6
+        args.lambda2 = 0.1
         args.lambda3 *= 1e-3
-        args.lambda4 *= 1e-2
-        args.lambda5 *= 2
-        args.lambda6 *= 100.
-        args.lambda7 *= 500.
-        args.lambda8 *= 1.
+        args.lambda4 = 0.01
+        args.lambda5 = 0.01
+        args.lambda6 = 100.
+        args.lambda7 = 1.
+        args.lambda8 = 1.
         # args.lambda8 *= 50.
 
-        args.lambda6 = 0  # No gaze pose loss.
+        # args.lambda6 = 0  # No gaze pose loss.
 
     args.override = True
 

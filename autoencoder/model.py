@@ -12,6 +12,47 @@ from pt_renderer import PTRenderer
 from utils.rotations import rotation_matrix_from_axis_combined
 
 
+def compute_rt_pt(probe_v, model_v):
+    """
+    Find correct rigid transformation given corresponded point sets using SVD.
+
+    :param probe_v: The moving part.
+    :param model_v: The fixed part.
+    :return:
+    """
+    if probe_v.shape[1] != model_v.shape[1] or probe_v.shape[2] != model_v.shape[2]:
+        raise ValueError("Probe and model have different numbers of points.")
+    if probe_v.shape[2] != 2 and probe_v.shape[2] != 3:
+        raise ValueError("Probe and model have wrong number of dimensions (only 2 or 3 allowed).")
+
+    probe_mean = probe_v.mean(dim=1, keepdim=True)
+    probe_pts_zm = probe_v - probe_mean
+    model_mean = model_v.mean(dim=1, keepdim=True)
+    model_pts_zm = model_v - model_mean
+
+    B = torch.bmm(torch.transpose(probe_pts_zm, 1, 2), model_pts_zm)
+    U, _, VH = torch.linalg.svd(B)
+    V = torch.transpose(VH, 1, 2)
+    R = torch.bmm(V, torch.transpose(U, 1, 2))
+
+    lz = torch.linalg.det(R) < 0
+    if probe_v.shape[2] == 3:
+        R[lz] = \
+            torch.bmm(
+                torch.bmm(V[lz],
+                          torch.diag(
+                              torch.tensor([1, 1, -1],
+                                           device=device,
+                                           dtype=torch.float32)).unsqueeze(0).repeat(V.shape[0], 1, 1)[lz]),
+            torch.transpose(U, 1, 2)[lz])
+    else:
+        raise NotImplemented
+
+    T = model_mean - probe_mean @ torch.transpose(R, 1, 2)
+
+    return R, T
+
+
 class Autoencoder(nn.Module):
     def __init__(self, args, face_crop_size=FACE_CROP_SIZE):
         super().__init__()
@@ -27,9 +68,6 @@ class Autoencoder(nn.Module):
 
         base_feature_channels = 400 + 145 + 3 + 3 + 1 + 2 + 2
         if args.dataset == "xgaze":
-            # Add face gaze azimuth and elevation.
-            base_feature_channels += 2
-
             # Add initial pose.
             initial_R = torch.tensor([[ 0.99494505, -0.00189795, -0.1004036 ],
                                       [ 0.02820983, -0.9542791 ,  0.297583  ],
@@ -54,36 +92,39 @@ class Autoencoder(nn.Module):
                                    self.face_model.albedo_vt.unsqueeze(0),
                                    face_crop_size=face_crop_size).to(device)
 
-    def forward(self, x, camera_parameters, warp_matrices=None):
+    def forward(self, x, camera_parameters, warp_matrices=None, landmarks_3d=None):
         # Encoder.
         latent_code = self.encoder(x)
         shape_parameters = latent_code[:, :400]
         albedo_parameters = latent_code[:, 400:545]
         face_rotation = latent_code[:, 545:548]
         face_translation = latent_code[:, 548:551]
-        face_scale = latent_code[:, 551:552]
+        face_scale = latent_code[:, 551:552].unsqueeze(1)
         left_eye_rotation = latent_code[:, 552:554]
         right_eye_rotation = latent_code[:, 554:556]
-        if self.args.dataset == "xgaze":
-            face_gaze_az_el = latent_code[:, 556:558]
-        else:
-            face_gaze_az_el = None
 
         face_scale = face_scale + 1.
 
         # 3D face reconstruction.
         vert, tex = self.face_model(shape_parameters, albedo_parameters)
-        # Rigid translation with scale. i.e. apply face pose.
-        # vert = torch.bmm(vert - vert.mean(1, keepdims=True),
-        #                  torch.transpose(axis_angle_to_matrix(face_rotation), 1, 2)) \
-        #     * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)
-        # print(face_rotation, face_translation, face_scale)
-        vert_mean = vert.mean(1, keepdims=True)
-        vert = torch.bmm(vert - vert_mean, rotation_matrix_from_axis_combined(face_rotation)) \
-            * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)  # Why use this?
-        if warp_matrices is not None:
-            # Stands for x-gaze dataset.
-            vert += vert_mean  # Haven't test on eyediap.
+        if landmarks_3d is None:
+            # Rigid translation with scale. i.e. apply face pose.
+            # vert = torch.bmm(vert - vert.mean(1, keepdims=True),
+            #                  torch.transpose(axis_angle_to_matrix(face_rotation), 1, 2)) \
+            #     * face_scale.unsqueeze(1) + face_translation.unsqueeze(1)
+            # print(face_rotation, face_translation, face_scale)
+            vert_mean = vert.mean(1, keepdims=True)
+            vert = torch.bmm(vert - vert_mean, rotation_matrix_from_axis_combined(face_rotation)) \
+                * face_scale + face_translation.unsqueeze(1)  # Why use this?
+            if warp_matrices is not None:
+                # Stands for x-gaze dataset.
+                vert += vert_mean  # Haven't test on eyediap.
+        else:
+            vert = vert - vert[:, self.face_model.mask].mean(1, keepdims=True)
+            vert *= face_scale
+            with torch.no_grad():
+                R, T = compute_rt_pt(vert[:,  self.face_model.landmarks], landmarks_3d)
+                vert = torch.bmm(vert, torch.transpose(R, 1, 2)) + T
 
         # # TODO: Debug
         # vert = vert - torch.mean(vert[:, self.face_model.left_eyeball_mask], dim=1).unsqueeze(1) + dbg1.unsqueeze(1)
@@ -211,7 +252,6 @@ class Autoencoder(nn.Module):
                     "right_eye_rotation": right_eye_rotation,
                     "left_gaze": left_gaze,  # Left and Right gazes.
                     "right_gaze": right_gaze,
-                    "face_gaze_az_el": face_gaze_az_el,  # Face gaze azimuth and elevation.
                     "gaze_point_l": gaze_point_l,  # Predicted left gaze point in world coordinate.
                     "gaze_point_r": gaze_point_r,  # Predicted right gaze point in world coordinate.
                     "gaze_point_mid": gaze_point_mid,  # Predicted gaze point in world coordinate.
@@ -307,7 +347,7 @@ class AutoencoderBaseline(nn.Module):
         else:
             self.encoder = Encoder(10, args.network).to(device)
 
-    def forward(self, x, camera_parameters=None, warp_matrices=None):
+    def forward(self, x, camera_parameters=None, warp_matrices=None, landmarks_3d=None):
         # Encoder.
         latent_code = self.encoder(x)
         l_eyeball_centre = latent_code[:, None, 0:3]
@@ -358,3 +398,22 @@ class AutoencoderBaseline(nn.Module):
             axis_angle_to_matrix(torch.cat([eyeball_rotation_axis_angle,
                                             torch.zeros_like(eyeball_rotation_axis_angle[:, 0:1])], dim=1))) \
                + eyeball_centre
+
+
+def find_gaze_axis_rotation_matrix(final_gaze, init_gaze):
+    batch_size = init_gaze.shape[0]
+    a = init_gaze
+    b = final_gaze
+
+    a = a / torch.norm(a, dim=1).unsqueeze(1)
+    b = b / torch.norm(b, dim=1).unsqueeze(1)
+
+    v = torch.cross(a, b)
+    v_cross = torch.stack([torch.stack([torch.zeros_like(v[:, 0]), -v[:, 2], v[:, 1]], dim=1),
+                           torch.stack([v[:, 2], torch.zeros_like(v[:, 0]), -v[:, 0]], dim=1),
+                           torch.stack([-v[:, 1], v[:, 0], torch.zeros_like(v[:, 0])], dim=1)], dim=1)
+    rot = torch.eye(3).to(device).repeat(batch_size, 1, 1) + \
+          v_cross + torch.bmm(v_cross, v_cross) * (1 / (1 + torch.sum(a * b, dim=1)))[:, None, None]
+    rot = torch.transpose(rot, 1, 2)
+
+    return rot
