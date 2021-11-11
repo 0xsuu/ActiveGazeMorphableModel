@@ -12,47 +12,6 @@ from pt_renderer import PTRenderer
 from utils.rotations import rotation_matrix_from_axis_combined
 
 
-def compute_rt_pt(probe_v, model_v):
-    """
-    Find correct rigid transformation given corresponded point sets using SVD.
-
-    :param probe_v: The moving part.
-    :param model_v: The fixed part.
-    :return:
-    """
-    if probe_v.shape[1] != model_v.shape[1] or probe_v.shape[2] != model_v.shape[2]:
-        raise ValueError("Probe and model have different numbers of points.")
-    if probe_v.shape[2] != 2 and probe_v.shape[2] != 3:
-        raise ValueError("Probe and model have wrong number of dimensions (only 2 or 3 allowed).")
-
-    probe_mean = probe_v.mean(dim=1, keepdim=True)
-    probe_pts_zm = probe_v - probe_mean
-    model_mean = model_v.mean(dim=1, keepdim=True)
-    model_pts_zm = model_v - model_mean
-
-    B = torch.bmm(torch.transpose(probe_pts_zm, 1, 2), model_pts_zm)
-    U, _, VH = torch.linalg.svd(B)
-    V = torch.transpose(VH, 1, 2)
-    R = torch.bmm(V, torch.transpose(U, 1, 2))
-
-    lz = torch.linalg.det(R) < 0
-    if probe_v.shape[2] == 3:
-        R[lz] = \
-            torch.bmm(
-                torch.bmm(V[lz],
-                          torch.diag(
-                              torch.tensor([1, 1, -1],
-                                           device=device,
-                                           dtype=torch.float32)).unsqueeze(0).repeat(V.shape[0], 1, 1)[lz]),
-            torch.transpose(U, 1, 2)[lz])
-    else:
-        raise NotImplemented
-
-    T = model_mean - probe_mean @ torch.transpose(R, 1, 2)
-
-    return R, T
-
-
 class Autoencoder(nn.Module):
     def __init__(self, args, face_crop_size=FACE_CROP_SIZE):
         super().__init__()
@@ -260,6 +219,8 @@ class Autoencoder(nn.Module):
                     "albedo_parameters": albedo_parameters,  # FLAME albedo parameters.
                     "vert_full": vert_full,  # Full FLAME head.
                     "vert_masked": vert,  # Masked FLAME head.
+                    "vert_img": vert_img,  # Masked FLAME head in image coordinate.
+                    "tex": tex,  # Full texture.
                     "left_eye_patch": left_eye_patch,
                     "right_eye_patch": right_eye_patch,
                     "sb": l_eyeball_centre + left_gaze * 1000.,
@@ -417,3 +378,44 @@ def find_gaze_axis_rotation_matrix(final_gaze, init_gaze):
     rot = torch.transpose(rot, 1, 2)
 
     return rot
+
+
+def compute_rt_pt(probe_v, model_v):
+    """
+    Find correct rigid transformation given corresponded point sets using SVD.
+
+    :param probe_v: The moving part.
+    :param model_v: The fixed part.
+    :return:
+    """
+    if probe_v.shape[1] != model_v.shape[1] or probe_v.shape[2] != model_v.shape[2]:
+        raise ValueError("Probe and model have different numbers of points.")
+    if probe_v.shape[2] != 2 and probe_v.shape[2] != 3:
+        raise ValueError("Probe and model have wrong number of dimensions (only 2 or 3 allowed).")
+
+    probe_mean = probe_v.mean(dim=1, keepdim=True)
+    probe_pts_zm = probe_v - probe_mean
+    model_mean = model_v.mean(dim=1, keepdim=True)
+    model_pts_zm = model_v - model_mean
+
+    B = torch.bmm(torch.transpose(probe_pts_zm, 1, 2), model_pts_zm)
+    U, _, VH = torch.linalg.svd(B)
+    V = torch.transpose(VH, 1, 2)
+    R = torch.bmm(V, torch.transpose(U, 1, 2))
+
+    lz = torch.linalg.det(R) < 0
+    if probe_v.shape[2] == 3:
+        R[lz] = \
+            torch.bmm(
+                torch.bmm(V[lz],
+                          torch.diag(
+                              torch.tensor([1, 1, -1],
+                                           device=device,
+                                           dtype=torch.float32)).unsqueeze(0).repeat(V.shape[0], 1, 1)[lz]),
+                torch.transpose(U, 1, 2)[lz])
+    else:
+        raise NotImplemented
+
+    T = model_mean - probe_mean @ torch.transpose(R, 1, 2)
+
+    return R, T

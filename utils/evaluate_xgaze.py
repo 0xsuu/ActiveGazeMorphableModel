@@ -8,6 +8,7 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 import numpy as np
+from torchvision import transforms
 from torchvision.transforms import Resize, Grayscale
 from tqdm import tqdm
 
@@ -17,7 +18,7 @@ from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 from utils.xgaze_dataset import XGazeDataset
 
-NAME = "xgaze_v8_nogt"
+NAME = "v9_l1_lmd7x50_run2"
 EPOCH = "best"
 PARTITION = "test"
 
@@ -46,6 +47,13 @@ def evaluate(qualitative=False):
     test_data = XGazeDataset(partition=PARTITION)
     test_loader = DataLoader(test_data, batch_size=256, shuffle=False, num_workers=0)
 
+    frame_transform = transforms.Compose([
+        Resize(224),
+        # transforms.ColorJitter(brightness=0.4, contrast=0.2, saturation=0.1, hue=0),
+        # AddGaussianNoise(0, 0.2),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
     if PARTITION == "test":
         rot_pred_list = []
         rot_pred_ogt_list = []
@@ -65,11 +73,11 @@ def evaluate(qualitative=False):
         head_rotation = data["head_rotations"]
 
         # Preprocess.
-        gt_img_input = gt_img.permute(0, 3, 1, 2)
+        gt_img_input = frame_transform(gt_img.permute(0, 3, 1, 2))
 
         # Forward.
         with torch.no_grad():
-            results = model(gt_img_input, camera_parameters, warp_matrices)
+            results = model(gt_img_input, camera_parameters, warp_matrices, data["face_landmarks_3d"])
 
         # Extract forward results.
         target_pred = results["gaze_point_mid"][:, 0]

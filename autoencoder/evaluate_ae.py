@@ -6,21 +6,27 @@ from types import SimpleNamespace
 import cv2
 import torch
 from matplotlib import pyplot as plt
+from pytorch3d.io import save_obj
+from pytorch3d.renderer import PerspectiveCameras
 from torch.utils.data import DataLoader
 import numpy as np
 from torchvision import transforms
 from torchvision.transforms import Resize, Grayscale
 from tqdm import tqdm
-from psbody.mesh import Mesh
 
 from autoencoder.model import Autoencoder, AutoencoderBaseline
 from constants import *
 from utils.eyediap_dataset import EYEDIAP
 from utils.camera_model import world_to_img, img_to_world
 
-NAME = "v9_l1_lmd7x50_pixx5"
+NAME = "v9_l1_lmd7x50_run2"
 EPOCH = "70"
-SUBJECT_IDS = [15]
+# SUBJECT_IDS = [15]
+# HERO_FRAME = 2731
+# SUBJECT_IDS = [16]
+# HERO_FRAME = 95
+SUBJECT_IDS = [4]
+HERO_FRAME = 1240
 
 
 def evaluate(qualitative=False):
@@ -60,9 +66,12 @@ def evaluate(qualitative=False):
     r_eye_patch_transformation = Grayscale()
 
     # Initiate video writer. The qualitative result will be saved in a video.
-    rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_" + EPOCH + "_" +
-                                            "_".join([str(i) for i in SUBJECT_IDS]) + ".mov",
-                                            cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
+    if HERO_FRAME is None:
+        rendered_video_writer = cv2.VideoWriter(LOGS_PATH + NAME + "/result_" + EPOCH + "_" +
+                                                "_".join([str(i) for i in SUBJECT_IDS]) + ".mov",
+                                                cv2.VideoWriter_fourcc("m", "p", "4", "v"), 20.0, (1024 + 512, 512))
+    else:
+        rendered_video_writer = None
 
     l_gaze_angle_errors_rot = []  # Gaze angle error calculated by rotation ground truth.
     r_gaze_angle_errors_rot = []
@@ -78,7 +87,10 @@ def evaluate(qualitative=False):
     l_gaze_angle_errors_tgt_gt = []
     r_gaze_angle_errors_tgt_gt = []
     f_gaze_angle_errors_tgt = []
+    eye_region_model_eval = {"vert": [], "lm": [], "lm_gt": [], "sid": []}
     for idx, data in tqdm(enumerate(test_loader), total=len(test_loader)):
+        if HERO_FRAME is not None and idx != HERO_FRAME:
+            continue
         gt_img = data["frames"].to(torch.float32) / 255.
         camera_parameters = (data["cam_R"], data["cam_T"], data["cam_K"])
 
@@ -140,6 +152,10 @@ def evaluate(qualitative=False):
                 data["target_3d"].cpu().numpy() - data["left_eyeball_3d"].cpu().numpy()) +
              get_angle(target_orig - r_eyeball_centre_orig,
                        data["target_3d"].cpu().numpy() - data["right_eyeball_3d"].cpu().numpy())) / 2
+        eye_region_model_eval["vert"].append(results["vert_masked"][0].cpu().numpy())
+        eye_region_model_eval["lm"].append(results["face_landmarks"][0].cpu().numpy())
+        eye_region_model_eval["lm_gt"].append(data["face_landmarks_crop"][0].cpu().numpy())
+        eye_region_model_eval["sid"].append(data["subject_id"][0].cpu().numpy())
         if qualitative:
             raw = data["frames"][0].cpu().numpy()
             raw_gaze = raw.copy()
@@ -176,12 +192,88 @@ def evaluate(qualitative=False):
             else:
                 rendered = np.zeros((512, 512, 3))
 
+            if idx == HERO_FRAME:
+                # Save textured mesh.
+                save_obj(LOGS_PATH + NAME + "/eval" + EPOCH + "_" +
+                         "_".join([str(i) for i in SUBJECT_IDS]) + "_" +
+                         str(HERO_FRAME) + ".obj", verts=results["vert_masked"][0], faces=model.face_model.faces,
+                         texture_map=results["tex"][0].flip(2), faces_uvs=model.face_model.albedo_ft,
+                         verts_uvs=model.face_model.albedo_vt)
+
+                # Save landmarks and eyes.
+                white_img = np.ones((512, 512, 3), dtype=np.uint8) * 255
+                for lm in results["face_landmarks"][0] / test_data.face_crop_size * 512:
+                    cv2.drawMarker(white_img, (int(lm[0]), int(lm[1])), (255, 0, 0),
+                                   markerType=cv2.MARKER_TILTED_CROSS, markerSize=12, thickness=3,
+                                   line_type=cv2.LINE_AA)
+
+                cameras = PerspectiveCameras(R=camera_parameters[0], T=camera_parameters[1], K=camera_parameters[2],
+                                             device=device)
+
+                def draw_eye_gazes(l_c, r_c, l_t, r_t, colour, length_l=0.2, length_r=0.2):
+                    l_eb_centre = cameras.transform_points(l_c)[0] / test_data.face_crop_size * 512
+                    r_eb_centre = cameras.transform_points(r_c)[0] / test_data.face_crop_size * 512
+                    cv2.circle(white_img, (int(l_eb_centre[0]), int(l_eb_centre[1])), 7, color=colour, thickness=2,
+                               lineType=cv2.LINE_AA)
+                    cv2.circle(white_img, (int(r_eb_centre[0]), int(r_eb_centre[1])), 7, color=colour, thickness=2,
+                               lineType=cv2.LINE_AA)
+
+                    tgt_l = (cameras.transform_points(l_t)[0]
+                             / test_data.face_crop_size * 512 - l_eb_centre) * length_l + l_eb_centre
+                    tgt_r = (cameras.transform_points(r_t)[0]
+                             / test_data.face_crop_size * 512 - r_eb_centre) * length_r + r_eb_centre
+                    cv2.arrowedLine(white_img, (int(l_eb_centre[0]), int(l_eb_centre[1])), (int(tgt_l[0]), int(tgt_l[1])),
+                                    colour, thickness=2, line_type=cv2.LINE_AA, tipLength=0.05)
+                    cv2.arrowedLine(white_img, (int(r_eb_centre[0]), int(r_eb_centre[1])), (int(tgt_r[0]), int(tgt_r[1])),
+                                    colour, thickness=2, line_type=cv2.LINE_AA, tipLength=0.05)
+
+                    return l_eb_centre, r_eb_centre
+
+                draw_eye_gazes(data["left_eyeball_3d_crop"], data["right_eyeball_3d_crop"],
+                               data["target_3d_crop"], data["target_3d_crop"], (0, 255, 0))
+                l_eb_centre, r_eb_centre = draw_eye_gazes(
+                    results["l_eyeball_centre"][0], results["r_eyeball_centre"][0],
+                    results["gaze_point_l"][0], results["gaze_point_r"][0], (0, 0, 255))
+
+                # Save gaze on raw image.
+                raw_gaze_demo = cv2.resize(raw.copy(), (512, 512))
+                tgt = cameras.transform_points(results["gaze_point_mid"][0])[0] / test_data.face_crop_size * 512
+                tgt_gt = cameras.transform_points(data["target_3d_crop"])[0] / test_data.face_crop_size * 512
+                l_gt = cameras.transform_points(data["left_eyeball_3d_crop"])[0] / test_data.face_crop_size * 512
+                r_gt = cameras.transform_points(data["right_eyeball_3d_crop"])[0] / test_data.face_crop_size * 512
+                cv2.arrowedLine(raw_gaze_demo,
+                                (int(l_gt[0]), int(l_gt[1])), (int(tgt_gt[0]), int(tgt_gt[1])),
+                                (0, 255, 0), thickness=4, line_type=cv2.LINE_AA, tipLength=0.05)
+                cv2.arrowedLine(raw_gaze_demo,
+                                (int(r_gt[0]), int(r_gt[1])), (int(tgt_gt[0]), int(tgt_gt[1])),
+                                (0, 255, 0), thickness=4, line_type=cv2.LINE_AA, tipLength=0.05)
+                cv2.arrowedLine(raw_gaze_demo,
+                                (int(l_eb_centre[0]), int(l_eb_centre[1])), (int(tgt[0]), int(tgt[1])),
+                                (0, 0, 255), thickness=4, line_type=cv2.LINE_AA, tipLength=0.05)
+                cv2.arrowedLine(raw_gaze_demo,
+                                (int(r_eb_centre[0]), int(r_eb_centre[1])), (int(tgt[0]), int(tgt[1])),
+                                (0, 0, 255), thickness=4, line_type=cv2.LINE_AA, tipLength=0.05)
+
+                cv2.imwrite(LOGS_PATH + NAME + "/eval" + EPOCH + "_" +
+                            "_".join([str(i) for i in SUBJECT_IDS]) + "_" +
+                            str(HERO_FRAME) + "_landmarks.png", white_img)
+                cv2.imwrite(LOGS_PATH + NAME + "/eval" + EPOCH + "_" +
+                            "_".join([str(i) for i in SUBJECT_IDS]) + "_" +
+                            str(HERO_FRAME) + "_raw.png", raw)
+                cv2.imwrite(LOGS_PATH + NAME + "/eval" + EPOCH + "_" +
+                            "_".join([str(i) for i in SUBJECT_IDS]) + "_" +
+                            str(HERO_FRAME) + "_rendered.png", rendered)
+                cv2.imwrite(LOGS_PATH + NAME + "/eval" + EPOCH + "_" +
+                            "_".join([str(i) for i in SUBJECT_IDS]) + "_" +
+                            str(HERO_FRAME) + "_gaze.png", raw_gaze_demo)
+
             raw = cv2.resize(raw, (512, 512))
             raw_gaze = cv2.resize(raw_gaze, (512, 512))
             combined = np.concatenate([raw, rendered, raw_gaze], axis=1).astype(np.uint8)
             cv2.putText(combined, "frame: %d, angle error tgt: %.04f" % (idx, angle_eror_tgt),
                         (10, 10), cv2.FONT_HERSHEY_PLAIN, 1.0, (255, 255, 255))
-            rendered_video_writer.write(combined)
+            if rendered_video_writer is not None:
+                rendered_video_writer.write(combined)
 
         # Calculate angle errors.
         l_gaze_angle_errors_rot.append(
@@ -216,15 +308,19 @@ def evaluate(qualitative=False):
             get_angle(target_orig - face_point,
                       data["target_3d"].cpu().numpy() - face_point))
 
-    rendered_video_writer.release()
+    if rendered_video_writer is not None:
+        rendered_video_writer.release()
 
     report_two_eye_gaze_angle_error("rot", l_gaze_angle_errors_rot, r_gaze_angle_errors_rot)
     report_two_eye_gaze_angle_error("rot_crop_gt", l_gaze_angle_errors_rot_gt, r_gaze_angle_errors_rot_gt)
     report_two_eye_gaze_angle_error("tgt", l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt)
     report_two_eye_gaze_angle_error("tgt_gt", l_gaze_angle_errors_tgt_gt, r_gaze_angle_errors_tgt_gt)
 
-    np.save(LOGS_PATH + NAME + "/result_" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + "tgt",
-            np.concatenate([l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt]))
+    if HERO_FRAME is None:
+        np.save(LOGS_PATH + NAME + "/result_" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + "tgt",
+                np.concatenate([l_gaze_angle_errors_tgt, r_gaze_angle_errors_tgt]))
+        np.save(LOGS_PATH + NAME + "/result_" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) +
+                "eye_region_model_stat", {k: np.stack(v) for k, v in eye_region_model_eval.items()})
 
     logging.info("Face gaze tgt error, mean: " + str(np.mean(f_gaze_angle_errors_tgt)) +
                  ", std: " + str(np.std(f_gaze_angle_errors_tgt)) +
@@ -316,20 +412,21 @@ def draw_gaze(image, l_eyeball_centre_screen_gt, target_screen_gt, r_eyeball_cen
 
 
 if __name__ == '__main__':
-    if os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
-        os.remove(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt")
-        while os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH +
-                             "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
-            pass
+    if HERO_FRAME is None:
+        if os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
+            os.remove(LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt")
+            while os.path.exists(LOGS_PATH + NAME + "/eval" + EPOCH +
+                                 "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"):
+                pass
 
-    console_handler = logging.StreamHandler()
-    logging.basicConfig(
-        handlers=[
-            logging.FileHandler(
-                filename=LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"),
-            console_handler],
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(message)s", datefmt="[%Y-%m-%d %H:%M:%S]")
-    console_handler.setLevel(logging.INFO)
+        console_handler = logging.StreamHandler()
+        logging.basicConfig(
+            handlers=[
+                logging.FileHandler(
+                    filename=LOGS_PATH + NAME + "/eval" + EPOCH + "_" + "_".join([str(i) for i in SUBJECT_IDS]) + ".txt"),
+                console_handler],
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)-8s %(message)s", datefmt="[%Y-%m-%d %H:%M:%S]")
+        console_handler.setLevel(logging.INFO)
 
     evaluate(qualitative=True)

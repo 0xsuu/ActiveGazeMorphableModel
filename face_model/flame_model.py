@@ -139,8 +139,8 @@ def visualise_model():
     renderer = PTRenderer(fm.faces, fm.albedo_ft.unsqueeze(0), fm.albedo_vt.unsqueeze(0))
     mesh_viewer = MeshViewers(shape=(1, 1))
     while True:
-        vert, tex = fm(torch.randn((1, 400), dtype=torch.float32, device=device),
-                       torch.randn((1, 145), dtype=torch.float32, device=device))
+        vert, tex = fm(torch.zeros((1, 400), dtype=torch.float32, device=device),
+                       torch.zeros((1, 145), dtype=torch.float32, device=device))
 
         vert = vert - vert[:, fm.right_eyeball_mask].mean(1) + torch.tensor([[0.0061, 0.0383, -0.0026]], device=device)
         # vert = vert - vert[:, fm.right_eyeball_mask].mean(1) +
